@@ -1,0 +1,52 @@
+name: Build site
+
+on:
+  # The catalog changes upstream, not here, so the site has to rebuild on a
+  # clock as well as on pushes — otherwise a plugin listed today would not get
+  # a page until someone happened to touch this repository.
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'scripts/build-site.mjs'
+      - 'src/registry.ts'
+      - 'src/regions.ts'
+      - 'src/net.ts'
+      - 'src/catalog-npm.ts'
+      - '.github/workflows/build-site.yml'
+
+# The remote catalog is fetched during the build; docs/ ships as a Pages artifact.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# docs/ is a pure function of the catalog and main's tip, so an older run can
+# only produce staler output — supersede it rather than queueing it.
+concurrency:
+  group: build-site
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install
+
+      - run: node scripts/build-site.mjs
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4

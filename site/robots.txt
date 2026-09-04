@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://funcodingdev.github.io/dsh-community-plugins/sitemap.xml

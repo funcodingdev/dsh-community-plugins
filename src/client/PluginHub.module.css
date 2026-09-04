@@ -1,0 +1,501 @@
+/* PluginHub section + install toast styles. Every color resolves through a
+ * --dsw-alias-* design token with the original light-mode literal as
+ * fallback. Interactive chrome (buttons, menus, dialogs, pills, inputs,
+ * disclosures) comes from @deepseek-ai/dsh-client-ui-primitives; this sheet
+ * only carries layout, cards, and the few bespoke surfaces without a
+ * primitive (progress bar, banners, tabs, swatches). */
+
+.root{height:100%;max-width:760px;display:flex;flex-direction:column;min-width:0;min-height:0;color:var(--dsw-alias-label-primary);position:relative;container-type:inline-size;background:transparent}
+.head{display:flex;flex-shrink:0;flex-direction:column;gap:12px;padding:0}
+.title{font-size:18px;line-height:25px;font-weight:600;margin:0}
+.sub{font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary);margin:0}
+.submitLink{display:inline-flex;align-items:center;gap:3px;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary);text-decoration:none;white-space:nowrap}
+.submitLink:hover{color:var(--dsw-alias-label-primary)}
+.tabs{display:flex;align-items:flex-end;gap:22px;border-bottom:1px solid var(--dsw-alias-border-l2);margin-top:2px}
+.tab{position:relative;border:0;padding:7px 1px 9px;background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:13px;line-height:20px;cursor:pointer;white-space:nowrap}
+.tab:hover,.tab.on{color:var(--dsw-alias-label-primary)}
+.tab.on::after,.tab:focus-visible::after{position:absolute;right:0;bottom:-1px;left:0;height:2px;border-radius:2px 2px 0 0;background:var(--dsw-alias-label-primary);content:''}
+.tab:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px;border-radius:2px;color:var(--dsw-alias-label-primary)}
+.banner{display:flex;align-items:center;gap:8px;background:var(--dsw-alias-bg-module-platform);border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:9px 12px;font-size:12px;line-height:18px;margin:0}
+.bannerIcon{flex-shrink:0;color:var(--dsw-alias-label-secondary,#6b7280)}
+.bannerHint{display:inline-flex;color:var(--dsw-alias-label-tertiary,#8b93a1);cursor:help}
+/* Keep asynchronous catalog replacements from shifting the body scroll position. */
+.body{flex:1;min-height:0;overflow-y:auto;padding:0 0 28px;overflow-x:hidden;overflow-anchor:none;scrollbar-width:thin;scrollbar-color:transparent transparent}
+/* Keep the scrollbar's width constant so showing it never resizes cards. */
+.body[data-scrolling="true"]{scrollbar-color:var(--dsw-alias-scrollbar-bg-l2,#c8ccd4) transparent}
+.body::-webkit-scrollbar{width:8px}
+.body::-webkit-scrollbar-track{background:transparent}
+.body::-webkit-scrollbar-thumb{border-radius:4px;background:transparent}
+.body[data-scrolling="true"]::-webkit-scrollbar-thumb{background:var(--dsw-alias-scrollbar-bg-l2,#c8ccd4)}
+/* Search and categories live outside the list scrollport on both tabs. */
+.filtersHead{flex-shrink:0;padding-top:14px}
+.cats{padding:10px 0 10px;margin:0 0 4px}
+.catsRow{display:flex;gap:10px;align-items:flex-start;position:relative}
+.star{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--dsw-alias-label-secondary,#9ca3af);flex:0 0 auto;white-space:nowrap}
+.top{position:absolute;right:18px;bottom:18px;z-index:20;display:inline-flex}
+.topBtn{width:38px;height:38px;border-radius:99px;padding:0}
+.tag{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-tertiary);border-radius:999px;flex-shrink:0;padding:1px 8px;font-size:11px;line-height:17px;font-weight:500}
+.okState{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:500;color:var(--dsw-alias-state-success-primary);white-space:nowrap}
+/* Categories keep their natural text width and wrap beside the filter controls. */
+.categoryList{position:relative;flex:1;min-width:0}
+.catsWrap,.catsMeasure{display:flex;flex-wrap:wrap;gap:8px 6px;min-width:0;padding:2px}
+.catsWrap>[data-chip],.catsMeasure>span:not(:last-child){flex:0 0 auto;max-width:100%;height:auto;min-height:24px;white-space:normal;overflow-wrap:anywhere}
+.catsMeasure{position:absolute;inset:0 0 auto;height:0;overflow:hidden;visibility:hidden;pointer-events:none}
+.catsToggle.catsToggle,.catsToggleMeasure{flex:0 0 24px;width:24px;height:24px;min-width:24px;padding:0}
+.catsToggle:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
+.shots{display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;margin:6px 0 8px;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+/* width, not just max-width — a slot with only a height reservation still
+   collapses to zero width until the image loads, so the strip snaps wider
+   the instant each one arrives instead of holding its place from the start. */
+.shot{width:220px;height:150px;flex:0 0 auto;object-fit:cover;border-radius:8px;border:1px solid var(--dsw-alias-border-default,#e5e7eb);background:var(--dsw-alias-bg-layer-2,#f3f4f6);cursor:pointer}
+/* Full-bleed overlay, not the Modal primitive — Modal is sized chrome
+   (title/description/footer) for making a decision, this is just an image
+   the user came to look at, no decision to make. */
+/* Above the Settings Modal it opens on top of — that Modal's own z-index
+   isn't defined in this package (its CSS module ships with the host app),
+   so this has to out-rank any plausible dialog layer, not just tie and win
+   on DOM order. */
+.lightbox{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;cursor:zoom-out}
+.lightboxImg{max-width:90vw;max-height:85vh;object-fit:contain;border-radius:4px;cursor:default}
+.lightboxClose{position:absolute;top:16px;right:16px;width:36px;height:36px;border-radius:99px;border:none;background:rgba(255,255,255,.12);color:#fff;font-size:22px;line-height:1;display:grid;place-items:center;cursor:pointer}
+.lightboxClose:hover{background:rgba(255,255,255,.22)}
+.lightboxNav{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:99px;border:none;background:rgba(255,255,255,.12);color:#fff;display:grid;place-items:center;cursor:pointer}
+.lightboxNav:hover{background:rgba(255,255,255,.22)}
+.lightboxPrev{left:16px}
+.lightboxNext{right:16px}
+.lightboxDots{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:8px}
+.lightboxDot{width:7px;height:7px;border-radius:99px;background:rgba(255,255,255,.4);cursor:pointer}
+.lightboxDotOn{background:#fff}
+.cmd{font-size:11px;line-height:18px;background:var(--dsw-alias-bg-layer-2,#f3f4f6);border-radius:6px;padding:8px 10px;font-family:ui-monospace,Menlo,monospace;margin:8px 0 0;word-break:break-all}
+/* flex-wrap so a long warning + trailing link wraps like normal text — the
+   deprecated-plugin warning below (.depLine) is the same icon+text+link
+   shape and already gets this right; without it the trailing link is the
+   one flex item left with no room once the paragraph text wraps, and gets
+   squeezed into a vertical stack instead of dropping to its own line. */
+.warnLine{color:var(--dsw-alias-state-warn-primary,#b45309);font-weight:600;font-size:12px;line-height:18px;margin:0;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.modalNote{font-size:12px;color:var(--dsw-alias-label-tertiary,#8b93a1);line-height:18px;margin:12px 0 0;display:flex;align-items:center;gap:4px}
+/* A row-first two-column table: each pair shares one grid row, so cards line
+   up horizontally and the DOM keeps the user's selected sort order. */
+.pluginGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr;align-items:stretch;gap:12px}
+.pluginGrid>*{min-width:0;height:100%}
+@container (max-width:548px){
+  .pluginGrid{grid-template-columns:minmax(0,1fr)}
+}
+/* The pluginhub usually lives inside a settings panel, so viewport media
+   queries do not describe the width available to it. Container queries do. */
+@container (max-width:420px){
+  .catsRow{flex-wrap:wrap}
+  .catsRow>.categoryList{flex-basis:100%}
+  .titleRow > .grow{display:none}
+  .repoLink{margin-left:0}
+}
+/* The host Settings dialog keeps a fixed navigation rail on phone-sized
+   viewports. Once that rail leaves less than a card's usable width, the
+   pluginhub becomes the only settings destination and keeps the host's own
+   close button in the content header. */
+@media (max-width:560px){
+  [role="dialog"]:has([data-dsh-pluginhub-root]) > nav{display:none}
+  [role="dialog"]:has([data-dsh-pluginhub-root]) > div{width:100%;min-width:0;flex:1 1 100%}
+}
+/* Public-directory card anatomy: repository identity and popularity lead,
+   description occupies a steady middle band, categories and action anchor
+   the bottom. Stretching is intentional because every grid pair is one row. */
+.card{min-height:196px;overflow:hidden;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:0;display:flex;flex-direction:column;gap:0;align-self:stretch;transition:border-color .16s,background .16s}
+.card:hover{border-color:var(--dsw-alias-label-dimmed)}
+.main{flex:1;display:flex;flex-direction:column;padding:14px 16px 12px}
+.row1{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:10px;min-width:0}
+.repoIdentity{min-width:0}
+.ownerPrefix{color:var(--dsw-alias-label-tertiary,#7d8490);font-weight:450}
+.ownerName{color:inherit;font:inherit}
+.cardStars{display:inline-flex;align-items:center;padding-top:1px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:17px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.cardAction{flex-shrink:0;display:inline-flex;align-items:center;margin-left:auto}
+.installBtn.installBtn{min-width:68px}
+.av{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#fff;font-size:9px;flex-shrink:0;object-fit:cover;background:var(--dsw-alias-bg-layer-2,#f3f4f6)}
+/* The plugin name carries the card, so it is the one thing sized up; the
+   author sits under it as a signature. Same reading order as a post
+   header — you take in who wrote it in one glance and spend the rest on
+   what it is. */
+.nm{font-weight:650;font-size:16px;line-height:23px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.01em}
+/* display:block is load-bearing, not cosmetic. `.nm` clips with
+   overflow:hidden + text-overflow:ellipsis, and neither applies to an
+   INLINE box — so once the title became an <a> (it links to the repo), a
+   long name stopped ellipsizing and overflowed the card instead, landing on
+   top of the Install button and swallowing its clicks. Caught by the e2e
+   suite as "the name link intercepts pointer events". */
+.nmLink{display:block;color:inherit;text-decoration:none}
+.card .nmLink{display:-webkit-box;min-width:0;max-height:42px;overflow:hidden;text-overflow:clip;white-space:normal;overflow-wrap:anywhere;font-size:15px;font-weight:600;line-height:21px;letter-spacing:0;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.card .pluginName{display:inline;overflow:visible;text-overflow:clip;white-space:normal;font:inherit;letter-spacing:inherit}
+.nmLink:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}
+/* The title has always opened the repo, but styled `color:inherit` with no
+   underline it looked like plain text, so nothing said so until the cursor
+   was already on it (#256). The GitHub mark is the standing affordance —
+   it names the destination before hover (#365). It rides the title's own
+   line rather than taking a row of its own; a second link to the same URL
+   would have cost every card ~20px of head, against the density the grid
+   was just tuned for. */
+.repoMark{color:var(--dsw-alias-label-tertiary);flex-shrink:0;margin-left:4px;vertical-align:-2px;display:inline-block}
+.nmLink:hover .repoMark{color:var(--dsw-alias-label-primary)}
+/* flex-wrap so a long owner name pushes the download/star counts to a
+   second line instead of squeezing the name itself toward unreadable: an
+   ellipsized span's own min-content width is 0 (overflow:hidden zeroes the
+   automatic minimum), so without `.owner`'s explicit min-width below, the
+   row never wraps — it just keeps shrinking the name past legibility while
+   the fixed-width counts stay whole. */
+.byline{display:flex;align-items:center;gap:6px;min-width:0;margin-top:2px;flex-wrap:wrap}
+/* Second line under the byline: the publish date, moved off the crowded
+   owner/downloads/stars row for visual balance (reported once downloads
+   joined stars on that line). */
+.meta{font-size:11px;color:var(--dsw-alias-label-secondary,#9ca3af);margin-top:2px}
+.metaInline{font-size:11px;color:var(--dsw-alias-label-secondary,#9ca3af)}
+/* The author name is the only variable-length part, so it is the only part
+   that shrinks; the counts stay whole because a truncated one is not a fact. */
+.owner{font-size:12px;color:var(--dsw-alias-label-secondary,#7d8490);flex:0 1 auto;min-width:44px;
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.desc{font-size:13px;line-height:21px;color:var(--dsw-alias-label-tertiary,#7d8490);margin:0}
+/* Four lines mirror the public catalog and reserve enough space for aligned
+   footers without making the cards feel sparse. */
+.card .desc{margin:8px 0 0;color:var(--dsw-alias-label-secondary)}
+.descClamp{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.card .descClamp{min-height:62px}
+.descToggle{display:flex;align-items:center;justify-content:center;width:20px;height:16px;margin-top:2px;
+            color:var(--dsw-alias-label-tertiary,#8b93a1);background:none;border:none;padding:0;cursor:pointer}
+.descToggle:hover{color:var(--dsw-alias-brand-primary,#4f6ef7)}
+.foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;row-gap:6px;margin-top:auto;padding:7px 10px;border-top:1px solid var(--dsw-alias-border-l2);min-height:30px}
+.foot .metaInline,.foot .src{white-space:nowrap}
+.card .tag{max-width:128px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grow{flex:1}
+.titleRow{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+/* Sits beside the heading so a screenshot of the page carries the
+   version — most reports arrive as a photo of the screen. Selectable
+   (not user-select:none) so it can also be copied into an issue. */
+.version{font-size:12px;line-height:18px;color:var(--dsw-alias-label-dimmed);font-variant-numeric:tabular-nums;flex-shrink:0;font-family:var(--dsw-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace)}
+.repoLink{display:inline-flex;align-items:center;gap:3px;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary);text-decoration:none;flex-shrink:0}
+.repoLink:hover{color:var(--dsw-alias-label-primary)}
+/* The note row (#347). The user's own text reads as theirs — slightly
+   stronger than a catalog blurb, which is the point: it is the line they
+   wrote for themselves. The original/mine toggle stays quiet text, while
+   add/edit is a small outlined action: when both used the description's
+   tertiary text treatment, `备注` read like another word in the blurb
+   instead of something the user could press (#399). */
+.noteRow{display:flex;align-items:baseline;gap:6px;min-width:0;flex-wrap:wrap}
+.noteMine{color:var(--dsw-alias-label-primary,#1f2328)}
+.noteToggle{font:inherit;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#8b93a1);background:0 0;border:none;padding:0;cursor:pointer;flex-shrink:0;white-space:nowrap}
+.noteToggle:hover{color:var(--dsw-alias-brand-primary,#4f6ef7);text-decoration:underline}
+.noteAction{display:inline-flex;align-items:center;color:var(--dsw-alias-label-primary,#1f2328);background:var(--dsw-alias-bg-layer-2,#f3f4f6);border:1px solid var(--dsw-alias-border-l3,#d9dde3);border-radius:4px;padding:0 5px;font-weight:600;text-decoration:none}
+.noteAction:hover{color:var(--dsw-alias-label-primary,#1f2328);border-color:var(--dsw-alias-brand-primary,#4f6ef7);text-decoration:none}
+.noteEdit{display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;margin-top:2px}
+.noteInput{flex:1;min-width:160px}
+.descTight{min-height:0}
+.src{font-size:11px;color:var(--dsw-alias-label-secondary,#9ca3af);text-decoration:none}
+.src:hover{color:var(--dsw-alias-brand-primary,#4f6ef7)}
+.dot{margin-left:5px;vertical-align:2px}
+.act{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;flex-wrap:wrap}
+.actLive{color:var(--dsw-alias-state-success-primary,#16a34a);font-weight:600;display:inline-flex;align-items:center;gap:4px}
+.actWarn{color:var(--dsw-alias-state-warn-primary,#b45309);font-weight:600;display:inline-flex;align-items:center;gap:4px}
+.actBroken{color:var(--dsw-alias-state-error-primary,#dc2626);font-weight:600;display:inline-flex;align-items:center;gap:4px}
+/* DisclosureRow compacted into the activation chip row. */
+.actWhy{margin-top:2px;color:var(--dsw-alias-label-secondary,#6b7280)}
+.loading{display:flex;flex-direction:column;align-items:center;gap:12px;padding:48px;color:var(--dsw-alias-label-secondary,#9ca3af);font-size:13px}
+.spin{display:inline-flex;flex-shrink:0;color:var(--dsw-alias-state-business-primary);animation:sp .8s linear infinite}
+@media (prefers-reduced-motion: reduce){
+  .spin{animation:dsphHubFade 1.5s ease-in-out infinite}
+}
+@keyframes dsphHubFade{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes sp{to{transform:rotate(360deg)}}
+.progress{display:flex;align-items:center;flex-wrap:wrap;gap:9px;background:var(--dsw-alias-bg-layer-2,#f3f4f6);border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:8px;padding:8px 12px;font-size:12px;margin:0;color:var(--dsw-alias-label-secondary,#6b7280)}
+.bar{width:100%;height:4px;border-radius:99px;background:var(--dsw-alias-border-l1,#e5e7eb);overflow:hidden}
+.barFill{height:100%;border-radius:99px;background:var(--dsw-alias-brand-primary,#4f6ef7);transition:width .6s ease}
+.barWave{width:30%;animation:dsphSlide 1.2s ease-in-out infinite}
+@keyframes dsphSlide{0%{margin-left:-30%}100%{margin-left:100%}}
+.irow .progress{margin-top:8px}
+.progress code{font-family:ui-monospace,Menlo,monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{color:var(--dsw-alias-label-secondary,#9ca3af);font-size:13px;padding:32px;text-align:center}
+.err{color:var(--dsw-alias-state-error-primary,#dc2626);font-size:12px;margin:8px 0;white-space:pre-wrap;word-break:break-all}
+/* Loader-id clash, rendered ON the card the user pressed Install on rather
+   than in the page-level .err banner: that banner is shared by a dozen
+   unrelated operations, so a failure reported there loses its connection to
+   the card that caused it as soon as a list is longer than a screen. */
+.cardBlocked{border-color:var(--dsw-alias-state-error-primary,#dc2626)}
+.conflictHead{display:flex;align-items:flex-start;gap:8px}
+.conflictIcon{flex-shrink:0;margin-top:1px;color:var(--dsw-alias-state-error-primary,#dc2626)}
+.conflictTitle{font-size:13px;font-weight:600;line-height:18px;color:var(--dsw-alias-state-error-primary,#dc2626)}
+.conflictBody{font-size:12px;line-height:19px;margin:0}
+/* One row per OWNER, not per id: the decision the user makes is which
+   plugins to uninstall, so the plugin name leads and the ids it clashes on
+   ride along as secondary evidence. */
+.roster{display:flex;flex-direction:column;gap:1px;border-radius:8px;overflow:hidden;
+        background:var(--dsw-alias-border-l2,#e5e7eb);border:1px solid var(--dsw-alias-border-l2,#e5e7eb)}
+.rosterRow{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--dsw-alias-bg-layer-1,#fff)}
+.rosterMain{display:flex;flex-direction:column;min-width:0}
+.rosterName{font-size:12px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rosterAuthor{font-size:10.5px;color:var(--dsw-alias-label-secondary,#9ca3af);
+              overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rosterTag{display:inline-flex;align-items:center;gap:3px;margin-left:auto;flex-shrink:0;font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:4px}
+.rosterTagKeep{color:var(--dsw-alias-state-success-primary,#16a34a);background:rgba(22,163,74,.12)}
+.rosterTagDrop{color:var(--dsw-alias-state-error-primary,#dc2626);background:rgba(220,38,38,.12)}
+/* The losing side is dimmed, so the outcome reads before any label does. */
+.rosterRowOut .rosterName{text-decoration:line-through}
+.rosterRowOut{opacity:.62}
+/* Separates the plugin being installed from the ones already there. */
+.rosterSplit{height:1px;background:var(--dsw-alias-border-l2,#e5e7eb)}
+.reassure{display:flex;align-items:center;gap:5px;font-size:11.5px;line-height:17px;
+          color:var(--dsw-alias-label-secondary,#6b7280);margin:0}
+.reassureOk{color:var(--dsw-alias-state-success-primary,#16a34a);flex-shrink:0}
+.conflictWhy{margin-top:2px;font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary,#8b93a1);
+             font-family:ui-monospace,Menlo,monospace;overflow-wrap:anywhere}
+.conflictWhyText{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;margin-top:5px}
+/* The clash resolves to a choice between two outcomes, so the options carry
+   their own consequence text and the safe one is preselected. */
+.choices{display:flex;flex-direction:column;gap:7px}
+.choice{display:flex;gap:9px;align-items:flex-start;text-align:left;font:inherit;cursor:pointer;
+        padding:9px 11px;border-radius:9px;background:var(--dsw-alias-bg-layer-1,#fff);
+        border:1px solid var(--dsw-alias-border-l3,#d9dde3)}
+.choice:has(input:disabled){cursor:default;opacity:.6}
+.choiceOn{border-color:var(--dsw-alias-brand-primary,#4f6ef7);
+          background:var(--dsw-alias-bg-layer-2,#f5f7ff)}
+/* accent-color, not a redrawn control: the platform's own radio is the one
+   users recognise, and it keeps focus ring and arrow-key grouping. */
+.choiceRadio{flex-shrink:0;margin:2px 0 0;width:13px;height:13px;
+             accent-color:var(--dsw-alias-brand-primary,#4f6ef7)}
+.choiceMain{display:flex;flex-direction:column;gap:3px;min-width:0}
+.choiceTitle{font-size:12px;font-weight:600;line-height:17px}
+.choiceNote{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#8b93a1)}
+.choiceSafe{color:var(--dsw-alias-state-success-primary,#16a34a)}
+
+/* --- activity entry + panel ---------------------------------------------
+   The entry sits in the tab row, so no amount of paginating, searching or
+   tab switching can take a record — or a pending decision — off screen.
+   That was the flaw of reporting an operation on the card that started it. */
+/* Status reads as the dot + tag pair the host's own plugin inventory uses,
+   so the two surfaces state the same fact the same way. Every occupant of
+   the trailing group is one pill height, which is what lets an enabled row
+   and a disabled one line up instead of drifting against each other. */
+.stateTag{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;min-height:20px;
+          border-radius:5px;padding:1px 7px;font-size:11px;line-height:16px;white-space:nowrap;
+          background:var(--dsw-alias-bg-layer-2,#f3f4f6);color:var(--dsw-alias-label-secondary,#6b7280)}
+.stateTag[data-on='true']{color:var(--dsw-alias-state-success-primary,#16a34a);
+                          background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#16a34a) 10%, transparent)}
+.stateDot{width:6px;height:6px;flex:none;border-radius:999px;background:var(--dsw-alias-label-tertiary,#8b93a1)}
+.stateDot[data-on='true']{background:var(--dsw-alias-state-success-primary,#16a34a)}
+/* The update slot: a tag when there is nothing to do, a button when there is.
+   Bare text here left the slot shorter than its neighbour's button. */
+/* Shrinkable, unlike the buttons beside it: this slot holds the row's only
+   variable-length copy ("本地开发链接" / "Local dev link" is three times the
+   width of "已是最新"), and as an unshrinkable nowrap tag it pushed Uninstall
+   onto a second line (#234 by @Ztyss). The tag is the informational half of
+   the row and the buttons are the actionable half, so the tag is what gives
+   way — ellipsized, with the full text on hover. */
+.metaTag{display:inline-block;flex-shrink:1;min-width:0;max-width:100%;overflow:hidden;
+         text-overflow:ellipsis;min-height:20px;border-radius:5px;
+         padding:1px 7px;font-size:11px;line-height:18px;white-space:nowrap;
+         background:var(--dsw-alias-bg-layer-2,#f3f4f6);color:var(--dsw-alias-label-tertiary,#8b93a1)}
+.metaTagOk{color:var(--dsw-alias-state-success-primary,#16a34a);
+           background:color-mix(in srgb, var(--dsw-alias-state-success-primary,#16a34a) 10%, transparent)}
+.nameLink{color:inherit;text-decoration:none}
+/* Installed-row title only. The version is a fact the row exists to state,
+   so it never truncates; the name is the variable-length part and is the
+   only thing allowed to shrink and ellipsize (#257). Scoped to this row
+   rather than added to `.nm`, which six other surfaces share. */
+/* Wraps rather than truncates (#342, #343). A scoped package name is the
+   thing that tells two installed plugins apart — `@deepseek-ai/dsh-client-ui-…`
+   and `@dsh-external/dsh-sessi…` are both just prefixes — and an ellipsis
+   removes exactly the end that distinguishes them. The paired grid row grows
+   with a wrapped name, preserving the table alignment across both columns.
+   `anywhere` rather than `break-word`: these names have long unbroken runs
+   between the slash and the dashes, which `break-word` leaves overflowing. */
+.irowName{display:flex;align-items:baseline;gap:6px;min-width:0;overflow:visible;text-overflow:clip;flex-wrap:wrap}
+.irowNameText{min-width:0;overflow-wrap:anywhere;white-space:normal}
+.irowName>.owner{flex:0 0 auto}
+.nameLink:hover{color:var(--dsw-alias-brand-primary,#4f6ef7);text-decoration:underline}
+/* Lift the entry off the tab row's bottom rule so the pill does not read as
+   clipped on narrow viewports. */
+.opWrap{position:relative;display:inline-flex;flex-shrink:0;margin-bottom:6px}
+.opEntry{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12px;
+         padding:4px 10px;border-radius:7px;cursor:pointer;position:relative;white-space:nowrap;
+         color:var(--dsw-alias-label-primary,#1f2328);
+         background:var(--dsw-alias-bg-layer-1,#fff);
+         border:1px solid var(--dsw-alias-border-l3,#d9dde3)}
+/* Idle is not news: no border, no fill, nothing competing with the tabs. */
+.opEntryQuiet{border-color:transparent;background:transparent;color:var(--dsw-alias-label-secondary,#6b7280)}
+.opEntryAlert{border-color:var(--dsw-alias-state-error-primary,#dc2626);color:var(--dsw-alias-state-error-primary,#dc2626)}
+.opDot{position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:99px;
+       background:var(--dsw-alias-state-error-primary,#dc2626)}
+.opPanel{position:absolute;top:calc(100% + 6px);right:0;z-index:40;width:460px;max-width:86vw;
+         max-height:70vh;overflow-y:auto;border-radius:12px;
+         background:var(--dsw-alias-bg-layer-1,#fff);
+         border:1px solid var(--dsw-alias-border-l3,#d9dde3);
+         box-shadow:0 20px 52px rgba(0,0,0,.28)}
+.opHead{display:flex;align-items:center;gap:8px;padding:9px 14px;
+        border-bottom:1px solid var(--dsw-alias-border-l2,#e5e7eb)}
+.opPanelTitle{font-size:12.5px;font-weight:600}
+.opCloseBtn.opCloseBtn{padding:0 6px;min-width:0;color:var(--dsw-alias-label-secondary,#6b7280)}
+.opAggregate{padding:9px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,#e5e7eb);
+             background:var(--dsw-alias-bg-layer-2,#f7f8fa)}
+.opAggregateTop{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.opAggregateHint{font-size:10.5px;color:var(--dsw-alias-label-tertiary,#8b93a1);margin-top:4px}
+.opRow{display:flex;align-items:flex-start;gap:9px;padding:9px 14px;
+       border-bottom:1px solid var(--dsw-alias-border-l2,#e5e7eb)}
+.opRow:last-child{border-bottom:none}
+.opRowAlert{background:rgba(220,38,38,.06)}
+.opIcon{flex-shrink:0;margin-top:1px;width:14px;display:grid;place-items:center}
+.opQueuedIcon{color:var(--dsw-alias-label-tertiary,#8b93a1);font-size:12px}
+.opMain{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.opTop{display:flex;align-items:baseline;gap:6px;min-width:0}
+.opVerb{font-size:12px;color:var(--dsw-alias-label-secondary,#6b7280);flex-shrink:0}
+.opName{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.opStatus{font-size:10.5px;line-height:16px;color:var(--dsw-alias-label-tertiary,#8b93a1);
+          overflow-wrap:anywhere}
+.opStatusBad{color:var(--dsw-alias-state-error-primary,#dc2626)}
+.opActions{flex-shrink:0;display:flex;align-items:center;gap:6px;margin-top:1px}
+.opDecision{margin-top:8px;padding-top:8px;display:flex;flex-direction:column;gap:8px;
+            border-top:1px dashed var(--dsw-alias-border-l2,#e5e7eb)}
+.opDecisionFoot{display:flex;align-items:center;gap:8px}
+.conflictDetailsToggle{display:inline-flex;align-items:center;gap:4px;font:inherit;font-size:11px;
+                       cursor:pointer;padding:2px 0;border:none;background:none;
+                       color:var(--dsw-alias-label-tertiary,#8b93a1)}
+.conflictDetailsToggle:hover{color:var(--dsw-alias-label-secondary,#6b7280)}
+.opEmpty{padding:30px 14px;text-align:center;font-size:12px;color:var(--dsw-alias-label-secondary,#6b7280)}
+.opEmptyHint{font-size:11px;color:var(--dsw-alias-label-tertiary,#8b93a1);margin-top:4px}
+/* The card keeps a terminal marker for an install that ended without
+   installing: a card that looks untouched invites pressing Install again. */
+.cardBlockedMark{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:11px;
+                 cursor:pointer;padding:4px 9px;border-radius:7px;
+                 color:var(--dsw-alias-state-error-primary,#dc2626);
+                 background:rgba(220,38,38,.08);
+                 border:1px solid var(--dsw-alias-state-error-primary,#dc2626)}
+/* Destructive actions — uninstall and the conflict swap.
+   Doubled selectors so these beat the primitive's own variant rules, the
+   same way .installBtn does. */
+.dangerBtn.dangerBtn{color:var(--dsw-alias-state-error-primary,#dc2626);border-color:var(--dsw-alias-state-error-primary,#dc2626)}
+.dangerBtn.dangerBtn:hover:not(:disabled){background:var(--dsw-alias-state-error-primary,#dc2626);color:#fff}
+.dangerArmed.dangerArmed{background:var(--dsw-alias-state-error-primary,#dc2626);border-color:var(--dsw-alias-state-error-primary,#dc2626);color:#fff}
+.retryBtn{margin-top:4px}
+.irow{overflow:hidden;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2);
+      border-radius:12px;padding:14px 16px 0;display:flex;flex-direction:column;gap:12px;min-width:0;
+      transition:border-color .16s,background .16s}
+.irow:hover{border-color:var(--dsw-alias-label-dimmed)}
+/* Everything packs left. Pushing the trailing controls right — whether with
+   justify-content or an auto margin on the tag — made the switch's position
+   depend on whether its neighbour rendered 更新 or 已是最新, so the switch
+   sat at a different x on every row. Packed left, state and switch land at
+   the same place regardless of what follows them. */
+.irowActions{display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap;min-width:0;margin:0 -16px;padding:7px 10px;border-top:1px solid var(--dsw-alias-border-l2);min-height:30px}
+/* The status tag and Uninstall travel together: nowrap so they never split
+   across lines, min-width:0 so the group can still shrink (the tag inside
+   ellipsizes) rather than forcing the whole row wider (#242). */
+.irowTrailing{display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;min-width:0}
+.irow>.src,.irow>.owner{white-space:nowrap;flex-shrink:0}
+.irow button{white-space:nowrap;flex-shrink:0}
+.tabSearchRow{display:flex;padding:0 0 8px}
+.discoverFilters{display:flex;align-items:center;gap:10px;flex-shrink:0;margin-left:auto}
+.verificationFilter{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:12px;color:var(--dsw-alias-label-secondary);cursor:pointer}
+.verificationFilter input{margin:0;accent-color:var(--dsw-alias-label-primary)}
+.verificationBadge{font-size:11px;line-height:17px;color:var(--dsw-alias-label-secondary)}
+.tabSearch{width:100%}
+/* Buttons sharing the row with a description must keep one line (#26, thanks @yanshuai2002) */
+.spec{font-size:11px;color:var(--dsw-alias-label-secondary,#9ca3af);font-family:ui-monospace,Menlo,monospace;overflow-wrap:anywhere;min-width:0}
+.staleAction{margin-top:8px}
+.pct{font-weight:600;font-size:11px;flex-shrink:0;color:var(--dsw-alias-label-secondary,#6b7280)}
+.loadSentinel{height:1px;overflow-anchor:none}
+/* #60: per-plugin enable/disable switches and deprecation badges */
+.depBadge{border:1px solid var(--dsw-alias-state-warn-primary,#b45309);color:var(--dsw-alias-state-warn-primary,#b45309);border-radius:4px;flex-shrink:0;padding:1px 6px;font-size:11px;line-height:16px;font-weight:600;white-space:nowrap;margin-left:6px}
+.deprecate{font-size:12px;line-height:18px;color:var(--dsw-alias-state-warn-primary,#b45309);background:var(--dsw-alias-bg-layer-2,#fdf3e3);border:1px solid var(--dsw-alias-border-l2,#f3e3c3);border-radius:8px;padding:8px 10px;margin:0}
+.deprecate a{color:var(--dsw-alias-state-warn-primary,#b45309);text-decoration:underline}
+.deprecate .src{margin-left:8px}
+.depLine{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.depLine>svg{flex:none}
+.switch{position:relative;width:38px;height:22px;border-radius:99px;border:1px solid var(--dsw-alias-border-l2,#d9dde3);background:var(--dsw-alias-bg-layer-2,#e5e7eb);cursor:pointer;padding:0;flex-shrink:0;transition:background .15s ease,border-color .15s ease}
+.switchOn{background:var(--dsw-alias-state-success-primary,#16a34a);border-color:var(--dsw-alias-state-success-primary,#16a34a)}
+.switchKnob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:99px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .15s ease}
+.switchOn .switchKnob{left:18px}
+.switch:disabled{opacity:.5;cursor:default}
+.sectAction{margin:14px 2px 8px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary,#6b7280);display:flex;align-items:center;gap:8px}
+
+/* Plugin-configuration card (dsh >= rc.7). Drawn here rather than imported:
+   the section's own cards live in a package whose value import would fail
+   the client bundle-purity gate, so a card owns its appearance. Matches the
+   chrome of the built-in cards beside it. */
+/* The plugin configuration page dispatches a card and lets the plugin draw
+   it ("a plugin that ships a browser half owns its own card"). These mirror
+   the host's own PluginCard one for one — same tokens, same sizes — so the
+   pluginhub's card is indistinguishable from the rows above and below it. An
+   earlier version invented a flat, always-open box and stood out badly. */
+.setCard{border:1px solid var(--dsw-alias-border-l2,#e5e7eb);background:var(--dsw-alias-bg-layer-3,#fff);border-radius:12px;list-style:none;transition:border-color .16s,background .16s}
+.setCard:hover{border-color:var(--dsw-alias-label-dimmed,#c8ccd4)}
+.setCardOpen{background:var(--dsw-alias-bg-layer-2,#f7f8fa);border-color:var(--dsw-alias-label-dimmed,#c8ccd4)}
+.setHeader{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex}
+.setHeader:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#4f6ef7);outline-offset:-2px}
+.setHeadText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex}
+.setName{color:var(--dsw-alias-label-primary,#1f2328);font-size:15px;font-weight:600;line-height:1.4}
+.setDesc{color:var(--dsw-alias-label-tertiary,#8b93a1);font-size:13px;line-height:1.5}
+.setChevron{color:var(--dsw-alias-label-tertiary,#8b93a1);flex:none;display:inline-flex;transition:transform .16s}
+.setChevronOpen{transform:rotate(180deg)}
+.setBody{border-top:1px solid var(--dsw-alias-border-l2,#e5e7eb);margin:0 16px;padding-bottom:8px}
+.setRow{display:flex;align-items:center;gap:12px;padding:12px 0}
+.setRow + .setRow{border-top:1px solid var(--dsw-alias-border-l2,#e5e7eb)}
+.setLabelBox{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0}
+.setLabel{font-size:13px;line-height:20px}
+.setHint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8b93a1)}
+/* The confirm block is deliberately NOT a modal: the consequence copy has to
+   stay readable while the checkbox is being decided. */
+.setConfirm{border-top:1px solid var(--dsw-alias-border-l2,#e5e7eb);display:flex;flex-direction:column;gap:8px;padding:12px 0 4px}
+.setCheck{display:flex;align-items:center;gap:8px;font-size:12px;line-height:18px;cursor:pointer}
+.setActions{border-top:1px solid var(--dsw-alias-border-l2,#e5e7eb);justify-content:flex-end;align-items:center;gap:8px;padding:12px 0 4px;display:flex}
+.setDanger{color:var(--dsw-alias-state-error-primary,#dc2626)}
+/* A two-state segmented control rather than a switch: "stable / beta" is a
+   choice between two named things, and a toggle would force one of them to
+   be the unlabelled "off". */
+.setSeg{display:inline-flex;flex-shrink:0;border:1px solid var(--dsw-alias-border-l2,#e5e7eb);border-radius:8px;padding:2px;gap:2px}
+.setSegBtn{font:inherit;font-size:12px;line-height:18px;padding:3px 10px;border:none;border-radius:6px;background:0 0;color:var(--dsw-alias-label-secondary,#6b7280);cursor:pointer}
+.setSegBtn:disabled{cursor:default;opacity:.5}
+.setSegOn{background:var(--dsw-alias-bg-layer-2,#eef0f4);color:var(--dsw-alias-label-primary,#1f2328);font-weight:600}
+.setBetaTag{margin-left:6px;padding:0 6px;border-radius:9px;font-size:11px;font-weight:600;line-height:17px;background:var(--dsw-alias-bg-module-platform,#eef0f4);color:var(--dsw-alias-label-secondary,#6b7280)}
+
+/* ---------------------------------------------------------- comments */
+/* Card footer entry point. Styled as the quiet sibling of .src, not as a
+   button: it competes with Install for attention otherwise, and Install is
+   what the card is for. */
+.commentsLink{background:none;border:0;padding:0;cursor:pointer;font-size:11px;line-height:16px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#9ca3af)}
+.commentsLink:hover{color:var(--dsw-alias-brand-primary,#4f6ef7)}
+.commentsNote{font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary,#9ca3af);margin:0 0 8px}
+.commentsStatus{font-size:12px;color:var(--dsw-alias-label-secondary,#9ca3af);margin:0}
+.commentsStatus:empty{display:none}
+.commentsError{font-size:12px;color:var(--dsw-alias-label-primary,#1f2328);margin:0 0 8px}
+.commentsFail{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:12px 0}
+/* The iframe reports its own height once giscus has the thread. Holding room
+   until then keeps the modal from snapping open to full size a beat after the
+   reader has already started looking at it. */
+/* The host owns the dialog's width and does not let a plugin change it, so the
+   thread is fitted to that width rather than overflowing a box that clips.
+   giscus lays out fine this narrow — it is the width it uses on phones. */
+.commentsMount{width:100%;min-height:240px;max-height:56vh;overflow:auto}
+.commentsMount iframe{width:100%}
+/* Update-notes entry + dialog (#294). The entry is a text button, not a
+   Button component: it must read as content in the row's flow rather than as
+   an action competing with 更新/卸载 on the trailing edge. */
+.notesLink{display:inline-flex;align-items:center;gap:3px;background:0 0;border:none;padding:0;margin:2px 0 0;font:inherit;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,#6b7280);cursor:pointer;text-align:left}
+.notesLink:hover{color:var(--dsw-alias-label-primary,#1f2328)}
+.notesBody{display:flex;flex-direction:column;gap:8px;min-width:0}
+/* 弹窗内的层级：范围行弱化、区块标题小而重、正文有承载面 */
+.notesRange{display:flex;align-items:center;gap:8px;font-size:12px;line-height:18px;margin-bottom:4px}
+.notesArrow{color:var(--dsw-alias-label-tertiary,#8b93a1)}
+.notesMeta{font-size:12px;line-height:18px;letter-spacing:.02em;text-transform:uppercase;color:var(--dsw-alias-label-secondary,#6b7280);display:flex;gap:6px;flex-wrap:wrap;align-items:baseline;margin-top:12px}
+.notesPre{margin:0;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:20px;padding:10px 12px;background:var(--dsw-alias-bg-layer-2,#eef0f4);border-radius:8px;max-height:40vh;overflow:auto}
+.notesList{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:20px}
+/* markdown轻渲染的层级：标题、段落、行内代码 */
+.notesRendered{display:flex;flex-direction:column;gap:6px;min-width:0}
+.notesH{font-size:13px;font-weight:650;line-height:20px;margin-top:6px}
+.notesP{font-size:13px;line-height:20px}
+.notesCode{font-family:var(--dsw-alias-font-mono,ui-monospace,monospace);font-size:12px;padding:1px 5px;border-radius:5px;background:var(--dsw-alias-bg-layer-2,#eef0f4)}
+/* 列表行：日期一列弱化对齐，内容一列自适应换行 */
+.notesList{margin:0;padding:0;list-style:none;display:flex;flex-direction:column}
+.notesRow{display:flex;gap:12px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--dsw-alias-border-l2,#e5e7eb)}
+.notesRow:last-child{border-bottom:none}
+.notesDate{flex-shrink:0;color:var(--dsw-alias-label-tertiary,#8b93a1);font-size:12px;font-variant-numeric:tabular-nums}
+.notesMsg{min-width:0;word-break:break-word;font-size:13px;line-height:20px}
+/* commit行：消息限高两行，短sha右对齐可点 */
+.notesMsg{min-width:0;word-break:break-word;font-size:13px;line-height:20px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.notesSha{margin-left:auto;flex-shrink:0;font-size:12px;color:var(--dsw-alias-label-secondary,#6b7280);text-decoration:none;font-variant-numeric:tabular-nums}
+.notesSha:hover{color:var(--dsw-alias-label-primary,#1f2328);text-decoration:underline}
+.notesVer{color:inherit;text-decoration:none;font-weight:600}
+.notesVer:hover{text-decoration:underline}

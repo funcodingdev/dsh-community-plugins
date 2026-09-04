@@ -1,0 +1,3 @@
+- insert:
+    - id: dsph-fixture-b
+      name: 'dsph-e2e-fixture-b'

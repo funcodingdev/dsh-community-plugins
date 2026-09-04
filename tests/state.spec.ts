@@ -1,0 +1,278 @@
+/**
+ * #60 durable state: state.json migrates the legacy `disabledSkins` key
+ * into the generic `disabled` list plus custom groups. These specs exercise
+ * the REAL hot.ts state functions and the pure groups.ts CRUD — the route
+ * wiring and live toggles live in flows.spec.ts.
+ */
+
+import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  readDisabled, readPluginHubState, writeDisabled, writePluginHubState,
+} from '../src/hot.ts'
+import {
+  createGroup, deleteGroup, removeFromGroups, renameGroup, setGroupMembers,
+} from '../src/groups.ts'
+
+function stateDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'dsph-state-'))
+  mkdirSync(join(dir, '.dsh-pluginhub'), { recursive: true })
+  return dir
+}
+
+function readRaw(dir: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(dir, '.dsh-pluginhub', 'state.json'), 'utf8')) as Record<string, unknown>
+}
+
+describe('pluginhub state.json (#60)', () => {
+  it('loads legacy disabledSkins; new writes use the unified disabled key', () => {
+    const dir = stateDir()
+    try {
+      writeFileSync(join(dir, '.dsh-pluginhub', 'state.json'), JSON.stringify({ disabledSkins: ['plugin-a'] }))
+      expect([...readPluginHubState(dir).disabled]).toEqual(['plugin-a'])
+      expect([...readDisabled(dir)]).toEqual(['plugin-a'])
+
+      writeDisabled(dir, new Set(['plugin-b']))
+      const raw = readRaw(dir)
+      expect(raw.disabled).toEqual(['plugin-b'])
+      expect(raw.disabledSkins).toBeUndefined()
+      expect([...readPluginHubState(dir).disabled]).toEqual(['plugin-b'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('writeDisabled preserves groups and groupOrder; writePluginHubState persists all', () => {
+    const dir = stateDir()
+    try {
+      writePluginHubState(dir, {
+        disabled: new Set(['dsh-loop']),
+        groups: { work: ['dsh-loop', 'dsh-notify'] },
+        groupOrder: ['work'],
+      })
+      // A plugin switch only rewrites the disable list — groups must survive.
+      writeDisabled(dir, new Set(['plugin-a']))
+      const state = readPluginHubState(dir)
+      expect([...state.disabled]).toEqual(['plugin-a'])
+      expect(state.groups).toEqual({ work: ['dsh-loop', 'dsh-notify'] })
+      expect(state.groupOrder).toEqual(['work'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /** #347. Several callers build a state object from the few fields they own
+   * and hand it to writePluginHubState. If notes were required there, every such
+   * call would silently erase all of them — the exact shape of #339, where a
+   * partial snapshot dropped a field nobody was thinking about. */
+  it('a partial write keeps notes that the caller never mentioned', () => {
+    const dir = stateDir()
+    writePluginHubState(dir, { disabled: new Set(['a']), groups: {}, groupOrder: [], notes: { 'dsh-loop': 'mine' } })
+    expect(readPluginHubState(dir).notes).toEqual({ 'dsh-loop': 'mine' })
+
+    // A caller that knows nothing about notes.
+    writePluginHubState(dir, { disabled: new Set(['a', 'b']), groups: {}, groupOrder: [] })
+    expect(readPluginHubState(dir).notes).toEqual({ 'dsh-loop': 'mine' })
+
+    // Only an explicit empty object clears them.
+    writePluginHubState(dir, { disabled: new Set(), groups: {}, groupOrder: [], notes: {} })
+    expect(readPluginHubState(dir).notes).toEqual({})
+  })
+
+  it('drops a blank note rather than storing an empty label', () => {
+    const dir = stateDir()
+    writeFileSync(join(dir, '.dsh-pluginhub', 'state.json'), JSON.stringify({
+      notes: { a: '  ', b: 'real', c: 7 },
+    }))
+    expect(readPluginHubState(dir).notes).toEqual({ b: 'real' })
+  })
+
+  it('readPluginHubState normalizes malformed payloads to empty state', () => {
+    const dir = stateDir()
+    try {
+      writeFileSync(join(dir, '.dsh-pluginhub', 'state.json'), 'not json')
+      expect(readPluginHubState(dir)).toEqual({ disabled: new Set(), groups: {}, groupOrder: [], notes: {} })
+      writeFileSync(join(dir, '.dsh-pluginhub', 'state.json'), JSON.stringify({
+        disabled: ['a', 'a', '', 7],
+        groups: { work: ['x', 'x', 3] },
+        groupOrder: ['work', 'work', null],
+      }))
+      const state = readPluginHubState(dir)
+      expect([...state.disabled]).toEqual(['a'])
+      expect(state.groups).toEqual({ work: ['x'] })
+      expect(state.groupOrder).toEqual(['work'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('remembers the release channel the user picked, in both directions', () => {
+    // "用户选完之后,应该就要记住用户上次选的". Round-tripped through the
+    // real file because the route-level spec runs against a stand-in, and a
+    // stand-in cannot vouch for the writer it stands in for.
+    const dir = stateDir()
+    try {
+      const base = { disabled: new Set(['dsh-loop']), groups: { work: ['dsh-loop'] }, groupOrder: ['work'] }
+      writePluginHubState(dir, { ...base, channel: 'beta' })
+      expect(readRaw(dir).channel).toBe('beta')
+      expect(readPluginHubState(dir).channel).toBe('beta')
+
+      // The way back off the channel has to persist as a CHOICE. Left to
+      // derivation a prerelease build re-reads as 'beta' every boot, so a
+      // writer that only recorded the interesting-looking value would strand
+      // the user on the channel they just left.
+      writePluginHubState(dir, { ...base, channel: 'stable' })
+      expect(readRaw(dir).channel).toBe('stable')
+      expect(readPluginHubState(dir).channel).toBe('stable')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('records no channel at all until one is chosen', () => {
+    // Absent has to stay absent through a round trip: it is what lets the
+    // channel derive from the running build, so hand-installing a
+    // prerelease lands on beta without a second step. Persisting a
+    // stand-in 'stable' here would silently answer the question for the
+    // user and then claim they had answered it.
+    const dir = stateDir()
+    try {
+      writePluginHubState(dir, { disabled: new Set(), groups: {}, groupOrder: [] })
+      expect('channel' in readRaw(dir)).toBe(false)
+      expect(readPluginHubState(dir).channel).toBeUndefined()
+
+      // ...and a junk value on disk is not a choice either.
+      writeFileSync(join(dir, '.dsh-pluginhub', 'state.json'), JSON.stringify({ channel: 'nightly' }))
+      expect(readPluginHubState(dir).channel).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a disable toggle does not forget the channel', () => {
+    // writeDisabled re-reads, mutates one field and writes the whole file
+    // back. Every field it fails to carry is erased by an unrelated click.
+    const dir = stateDir()
+    try {
+      writePluginHubState(dir, { disabled: new Set(), groups: {}, groupOrder: [], channel: 'beta' })
+      writeDisabled(dir, new Set(['plugin-a']))
+      expect(readPluginHubState(dir).channel).toBe('beta')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('a partial write must not erase the rest of the state (#435)', () => {
+  it('keeps the channel and region a plugin toggle knows nothing about', () => {
+    // Five call sites in routes.ts write `{ disabled, groups, groupOrder }`
+    // — everything a toggle knows. Before this, that shape silently threw
+    // away the update channel and download region, both of which the user
+    // picked deliberately in the settings card. Neither has an "unchoose"
+    // path: once set they only move to another value, so an absent one is
+    // always the caller having nothing to say.
+    const dir = stateDir()
+    writePluginHubState(dir, {
+      disabled: new Set(), groups: {}, groupOrder: [],
+      notes: { alpha: 'my note' }, channel: 'beta', region: 'china',
+    })
+
+    const before = readPluginHubState(dir)
+    writePluginHubState(dir, { disabled: new Set(['x']), groups: before.groups, groupOrder: before.groupOrder })
+
+    const after = readPluginHubState(dir)
+    expect(after.channel).toBe('beta')
+    expect(after.region).toBe('china')
+    expect(after.notes).toEqual({ alpha: 'my note' })
+    expect([...after.disabled]).toEqual(['x'])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('still lets the last note be deleted', () => {
+    // The preserve rule must not become "notes can never be cleared". The
+    // note route re-reads first, so its empty object is a real statement
+    // about the world rather than a stale one.
+    const dir = stateDir()
+    writePluginHubState(dir, { disabled: new Set(), groups: {}, groupOrder: [], notes: { only: 'note' } })
+    const current = readPluginHubState(dir)
+    writePluginHubState(dir, { ...current, notes: {} })
+
+    expect(readPluginHubState(dir).notes).toEqual({})
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('leaves an unchosen channel and region unset rather than inventing one', () => {
+    // An absent region is what makes the probe run at boot; writing a
+    // default here would mean it never does.
+    const dir = stateDir()
+    writePluginHubState(dir, { disabled: new Set(['a']), groups: {}, groupOrder: [] })
+
+    const written = JSON.parse(readFileSync(join(dir, '.dsh-pluginhub', 'state.json'), 'utf8')) as Record<string, unknown>
+    expect('channel' in written).toBe(false)
+    expect('region' in written).toBe(false)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('lets a manual region choice clear the automatic-region marker', () => {
+    const dir = stateDir()
+    try {
+      writePluginHubState(dir, {
+        disabled: new Set(), groups: {}, groupOrder: [], region: 'china', regionAuto: true,
+      })
+
+      // Partial writers still omit the field and must preserve the marker.
+      writePluginHubState(dir, { disabled: new Set(['dsh-loop']), groups: {}, groupOrder: [] })
+      expect(readPluginHubState(dir).regionAuto).toBe(true)
+
+      // The manual-region route spreads the current state, changes region,
+      // and explicitly clears regionAuto before writing.
+      const current = readPluginHubState(dir)
+      writePluginHubState(dir, { ...current, region: 'global', regionAuto: undefined })
+
+      const written = JSON.parse(readFileSync(join(dir, '.dsh-pluginhub', 'state.json'), 'utf8')) as Record<string, unknown>
+      expect(written.region).toBe('global')
+      expect('regionAuto' in written).toBe(false)
+      expect(readPluginHubState(dir).regionAuto).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('group CRUD (groups.ts)', () => {
+  it('create/rename/delete keep groups and order consistent', () => {
+    const state = { groups: {}, groupOrder: [] }
+    expect(createGroup(state, 'work').ok).toBe(true)
+    expect(createGroup(state, 'work').ok).toBe(false)
+    expect(createGroup(state, 'bad/name').ok).toBe(false)
+    expect(createGroup(state, '').ok).toBe(false)
+
+    expect(renameGroup(state, 'work', 'daily').ok).toBe(true)
+    expect(state.groups).toEqual({ daily: [] })
+    expect(state.groupOrder).toEqual(['daily'])
+    expect(renameGroup(state, 'missing', 'x').ok).toBe(false)
+    expect(renameGroup(state, 'daily', 'work').ok).toBe(true)
+    expect(renameGroup(state, 'work', 'work').ok).toBe(true)
+
+    expect(deleteGroup(state, 'work').ok).toBe(true)
+    expect(state).toEqual({ groups: {}, groupOrder: [] })
+    expect(deleteGroup(state, 'ghost').ok).toBe(false)
+  })
+
+  it('set-members keeps only installed unique names and drops the pluginhub itself', () => {
+    const state = { groups: { work: [] }, groupOrder: ['work'] }
+    const installed = new Set(['dsh-loop', 'dsh-notify', 'dsh-community-plugins'])
+    expect(setGroupMembers(state, 'work', ['dsh-loop', 'dsh-loop', 'ghost', 'dsh-community-plugins'], installed).ok).toBe(true)
+    expect(state.groups.work).toEqual(['dsh-loop'])
+    expect(setGroupMembers(state, 'ghost', [], installed).ok).toBe(false)
+    expect(setGroupMembers(state, 'work', 'nope', installed).ok).toBe(false)
+  })
+
+  it('removeFromGroups prunes a name everywhere', () => {
+    const state = { groups: { a: ['x', 'y'], b: ['x'] }, groupOrder: ['a', 'b'] }
+    removeFromGroups(state, 'x')
+    expect(state.groups).toEqual({ a: ['y'], b: [] })
+  })
+})
