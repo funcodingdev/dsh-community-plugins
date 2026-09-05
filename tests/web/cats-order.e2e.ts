@@ -33,34 +33,47 @@ describe.skipIf(!dshAvailable())('web e2e: category chip order stays put', () =>
       { width: 390, height: 844 },
     ]) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
-      const dimensions = await wrap.evaluate((element: {
-        clientWidth: number; scrollWidth: number; children: ArrayLike<{ getBoundingClientRect(): { top: number } }>
-      }) => ({
-        width: element.clientWidth, contentWidth: element.scrollWidth,
-        rows: new Set(Array.from(element.children, child => child.getBoundingClientRect().top)).size,
-      }))
-      if (viewport.width <= 420) expect(dimensions.rows).toBeGreaterThan(1)
-      expect(dimensions.contentWidth).toBeLessThanOrEqual(dimensions.width)
-      const wrapBox = await wrap.boundingBox()
-      const filterBox = await filters.boundingBox()
-      if (viewport.width > 420) {
-        expect(filterBox.x).toBeGreaterThanOrEqual(wrapBox.x + wrapBox.width)
-        expect(Math.abs(filterBox.y - wrapBox.y)).toBeLessThan(2)
-      } else {
-        expect(filterBox.y).toBeGreaterThanOrEqual(wrapBox.y + wrapBox.height)
-      }
-      const verificationBox = await filters.locator('label').boundingBox()
-      const sortBox = await filters.getByRole('button').boundingBox()
-      expect(verificationBox.x + verificationBox.width).toBeLessThan(sortBox.x)
-      expect(Math.abs(verificationBox.y + verificationBox.height / 2 - sortBox.y - sortBox.height / 2)).toBeLessThan(2)
-      const chipWidths = []
-      for (const chip of await chips.all()) {
-        const box = await chip.boundingBox()
-        expect(box.x).toBeGreaterThanOrEqual(wrapBox.x)
-        expect(box.x + box.width).toBeLessThanOrEqual(wrapBox.x + wrapBox.width)
-        chipWidths.push(Math.round(box.width))
-      }
-      expect(new Set(chipWidths).size).toBeGreaterThan(1)
+      // ResizeObserver can fold chips between separate Playwright reads.
+      // Take every rectangle in one browser task, then retry the complete
+      // layout contract while the resize/font-driven reflow settles.
+      await expect.poll(async () => {
+        const layout = await page.evaluate(() => {
+          const doc = (globalThis as any).document
+          const wrap = doc.querySelector('[class*="catsWrap"]')
+          const filters = doc.querySelector('[class*="discoverFilters"]')
+          const rect = (element: any) => {
+            const { x, y, width, height } = element.getBoundingClientRect()
+            return { x, y, width, height }
+          }
+          return {
+            width: wrap.clientWidth, contentWidth: wrap.scrollWidth,
+            rows: new Set(Array.from(wrap.children, (child: any) => child.getBoundingClientRect().top)).size,
+            wrap: rect(wrap), filters: rect(filters),
+            verification: rect(filters.querySelector('label')),
+            sort: rect(filters.querySelector('button')),
+            chips: Array.from(wrap.querySelectorAll('[data-chip="1"]'), rect),
+          }
+        })
+        if (viewport.width <= 420) expect(layout.rows).toBeGreaterThan(1)
+        expect(layout.contentWidth).toBeLessThanOrEqual(layout.width)
+        const { wrap: wrapBox, filters: filterBox, verification: verificationBox, sort: sortBox } = layout
+        if (viewport.width > 420) {
+          expect(filterBox.x).toBeGreaterThanOrEqual(wrapBox.x + wrapBox.width)
+          expect(Math.abs(filterBox.y - wrapBox.y)).toBeLessThan(2)
+        } else {
+          expect(filterBox.y).toBeGreaterThanOrEqual(wrapBox.y + wrapBox.height)
+        }
+        expect(verificationBox.x + verificationBox.width).toBeLessThan(sortBox.x)
+        expect(Math.abs(verificationBox.y + verificationBox.height / 2 - sortBox.y - sortBox.height / 2)).toBeLessThan(2)
+        const chipWidths = []
+        for (const box of layout.chips) {
+          expect(box.x).toBeGreaterThanOrEqual(wrapBox.x)
+          expect(box.x + box.width).toBeLessThanOrEqual(wrapBox.x + wrapBox.width)
+          chipWidths.push(Math.round(box.width))
+        }
+        expect(new Set(chipWidths).size).toBeGreaterThan(1)
+        return true
+      }, { timeout: 10_000 }).toBe(true)
     }
     // Narrow viewports may fold the final category into overflow. Compare
     // the complete order only after expanding, not against a desktop snapshot
