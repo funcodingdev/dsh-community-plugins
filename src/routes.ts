@@ -469,6 +469,94 @@ export function mountPluginHubRoutes(
     return { ok, reason }
   }
 
+  function toggleProtection(name: string): string | null {
+    if (SELF_NAMES.has(name)) return 'the pluginhub cannot be disabled from its own page; use the dsh CLI'
+    return isProtectedModule(name)
+      ? `${name} 属于宿主基础设施,禁止开关(会破坏热加载/传输/存储链) / ${name} is host infrastructure and cannot be toggled (it would break the hot-reload/transport/storage chain)`
+      : null
+  }
+
+  /** Apply the live and durable toggle together; callers hold the mutation lock. */
+  async function applyPluginToggle(name: string, enabled: boolean) {
+    const result = await setPluginEnabled(name, enabled)
+    // Durable patch-layer write (port of dsh-plugin-hub): the package's
+    // bundle rows get 'disabled: true|false' in the user patch layer,
+    // which DSH's HMR applies within ~1s AND the loader re-applies on
+    // every boot. Client-only packages have no bundle rows — the
+    // pluginhub's own state.json replay covers those.
+    const patchRows = rowIdsForPackage(host, activeProfileDir, name)
+    // Disable-carrier (#224): a bundle whose patch DISABLES a plugin it
+    // does not own (dsh-postgres-backends disables session-persistence-jsonl).
+    // Disabling only its inserted rows leaves that foreign disable applying
+    // on every boot — the bundle stays in the stack — so drop it from
+    // dsh.profile.bundles entirely, which stops its whole patch at once
+    // (including any config side effects it carries). Enabling re-adds it.
+    // A bundle that merely reconfigures a neighbour (config without
+    // disabled) is NOT dropped: #147 requires disabling it to leave the
+    // neighbour live, and the e2e fixture-cross re-enable breaks otherwise.
+    const disablesOthers = carrierDisableIds(activeProfileDir, name)
+    const isCarrier = disablesOthers.length > 0
+    let bundleSwitch: { ok: boolean; reason: string | null } = { ok: true, reason: null }
+    if (isCarrier) {
+      try {
+        if (enabled) addProfileBundle(activeProfileDir, name)
+        else removeProfileBundle(activeProfileDir, name)
+        logEvent('info', 'toggle', `${name}: disable-carrier ${enabled ? 're-added to' : 'removed from'} dsh.profile.bundles (disables: ${disablesOthers.join(', ')})`)
+      } catch (error) {
+        bundleSwitch = { ok: false, reason: error instanceof Error ? error.message : String(error) }
+        logEvent('warn', 'toggle', `${name}: carrier bundle switch failed — ${bundleSwitch.reason}`)
+      }
+    }
+    let patchWrite: { ok: boolean; reason: string | null } | null = null
+    if (patchRows.length > 0) {
+      for (const rowId of patchRows) {
+        const result = enabled ? await enableRow(userPatchPath, rowId) : await disableRow(userPatchPath, rowId)
+        if (!result.ok && patchWrite === null) patchWrite = result
+      }
+      if (patchWrite === null) {
+        logEvent('info', 'toggle', `${name}: patch layer ${enabled ? 'enabled' : 'disabled'} rows ${patchRows.join(', ')}`)
+      } else {
+        logEvent('warn', 'toggle', `${name}: patch layer write refused — ${patchWrite.reason}`)
+      }
+    }
+    const ok = result.ok && (patchWrite?.ok ?? true) && bundleSwitch.ok
+    const reason = result.reason ?? patchWrite?.reason ?? bundleSwitch.reason ?? undefined
+    logEvent(ok ? 'info' : 'error', 'toggle', `${name}: ${enabled ? 'on' : 'off'} ok=${String(ok)}`)
+    // Activation reads the post-write truth: the switch state OR the
+    // patch layer, so a disabled plugin never reports "restart to
+    // apply".
+    const patchNow = readUserPatchState(userPatchPath)
+    const offNow = disabled.has(name) || patchRows.some(id => patchNow.disables.includes(id))
+    // When the live composition does not match the requested state
+    // (enable failed to hot-mount / disable left the fiber up), the
+    // change lands on the next boot via the patch layer + state.json —
+    // the client reuses the pluginhub's pending-restart banner for it.
+    const liveAfter = liveNames().has(name)
+    // A carrier toggle moves the bundle in/out of dsh.profile.bundles,
+    // which only takes effect on the next composition — always a restart.
+    // Non-carrier plugins keep the live-mount based decision.
+    const restart = isCarrier ? true : enabled ? !liveAfter : liveAfter
+    // A client-part plugin's UI is in the page already — toggling it
+    // needs a browser refresh to show the change (same signal the
+    // install flow uses for the hot banner).
+    const refresh = packageHasClientPart(activeProfileDir, name)
+    return {
+      ok,
+      name,
+      enabled,
+      disabled: [...disabled],
+      live: listHotMounts(),
+      activation: { [name]: verifyActivation(config.profile, name, liveNames(), activeProfileDir, offNow) },
+      reason,
+      patchRows,
+      patchWrite: patchWrite ?? { ok: true, reason: null },
+      carrier: disablesOthers,
+      bundleSwitch,
+      restart,
+      refresh,
+    }
+  }
+
   /**
    * Everything live in the running composition: pluginhub hot mounts plus
    * bundle-layer loader entries whose fiber is up (loaded at boot). This is
@@ -1302,93 +1390,14 @@ export function mountPluginHubRoutes(
               sendJson(response, 400, { error: 'plugin is not installed' })
               return
             }
-          // Host infrastructure (port of dsh-plugin-hub): switching off the
-          // timer/hmr/webserver/storage chain would break the very HMR the
-          // patch layer relies on, so those rows refuse to toggle.
-          if (isProtectedModule(name)) {
-            sendJson(response, 403, {
-              error: `${name} 属于宿主基础设施,禁止开关(会破坏热加载/传输/存储链) / ${name} is host infrastructure and cannot be toggled (it would break the hot-reload/transport/storage chain)`,
-            })
-            return
-          }
-          pendingRollbacks.clear()
-          const result = await setPluginEnabled(name, enabled)
-          const ok = result.ok
-          const reason = result.reason
-          // Durable patch-layer write (port of dsh-plugin-hub): the package's
-          // bundle rows get 'disabled: true|false' in the user patch layer,
-          // which DSH's HMR applies within ~1s AND the loader re-applies on
-          // every boot. Client-only packages have no bundle rows — the
-          // pluginhub's own state.json replay covers those.
-          const patchRows = rowIdsForPackage(host, activeProfileDir, name)
-          // Disable-carrier (#224): a bundle whose patch DISABLES a plugin it
-          // does not own (dsh-postgres-backends disables session-persistence-jsonl).
-          // Disabling only its inserted rows leaves that foreign disable applying
-          // on every boot — the bundle stays in the stack — so drop it from
-          // dsh.profile.bundles entirely, which stops its whole patch at once
-          // (including any config side effects it carries). Enabling re-adds it.
-          // A bundle that merely reconfigures a neighbour (config without
-          // disabled) is NOT dropped: #147 requires disabling it to leave the
-          // neighbour live, and the e2e fixture-cross re-enable breaks otherwise.
-          const disablesOthers = carrierDisableIds(activeProfileDir, name)
-          const isCarrier = disablesOthers.length > 0
-          let bundleSwitch: { ok: boolean; reason: string | null } = { ok: true, reason: null }
-          if (isCarrier) {
-            try {
-              if (enabled) addProfileBundle(activeProfileDir, name)
-              else removeProfileBundle(activeProfileDir, name)
-              logEvent('info', 'toggle', `${name}: disable-carrier ${enabled ? 're-added to' : 'removed from'} dsh.profile.bundles (disables: ${disablesOthers.join(', ')})`)
-            } catch (error) {
-              bundleSwitch = { ok: false, reason: error instanceof Error ? error.message : String(error) }
-              logEvent('warn', 'toggle', `${name}: carrier bundle switch failed — ${bundleSwitch.reason}`)
+            const protection = toggleProtection(name)
+            if (protection !== null) {
+              sendJson(response, 403, { error: protection })
+              return
             }
-          }
-          let patchWrite: { ok: boolean; reason: string | null } | null = null
-          if (patchRows.length > 0) {
-            for (const rowId of patchRows) {
-              const result = enabled ? await enableRow(userPatchPath, rowId) : await disableRow(userPatchPath, rowId)
-              if (!result.ok && patchWrite === null) patchWrite = result
-            }
-            if (patchWrite === null) {
-              logEvent('info', 'toggle', `${name}: patch layer ${enabled ? 'enabled' : 'disabled'} rows ${patchRows.join(', ')}`)
-            } else {
-              logEvent('warn', 'toggle', `${name}: patch layer write refused — ${patchWrite.reason}`)
-            }
-          }
-          logEvent(ok ? 'info' : 'error', 'toggle', `${name}: ${enabled ? 'on' : 'off'} ok=${String(ok)}`)
-          // Activation reads the post-write truth: the switch state OR the
-          // patch layer, so a disabled plugin never reports "restart to
-          // apply".
-          const patchNow = readUserPatchState(userPatchPath)
-          const offNow = disabled.has(name) || patchRows.some(id => patchNow.disables.includes(id))
-          // When the live composition does not match the requested state
-          // (enable failed to hot-mount / disable left the fiber up), the
-          // change lands on the next boot via the patch layer + state.json —
-          // the client reuses the pluginhub's pending-restart banner for it.
-          const liveAfter = liveNames().has(name)
-          // A carrier toggle moves the bundle in/out of dsh.profile.bundles,
-          // which only takes effect on the next composition — always a restart.
-          // Non-carrier plugins keep the live-mount based decision.
-          const restart = isCarrier ? true : enabled ? !liveAfter : liveAfter
-          // A client-part plugin's UI is in the page already — toggling it
-          // needs a browser refresh to show the change (same signal the
-          // install flow uses for the hot banner).
-          const refresh = packageHasClientPart(activeProfileDir, name)
-            sendJson(response, ok ? 200 : 502, {
-              ok,
-              name,
-              enabled,
-              disabled: [...disabled],
-              live: listHotMounts(),
-              activation: { [name]: verifyActivation(config.profile, name, liveNames(), activeProfileDir, offNow) },
-              reason,
-              patchRows,
-              patchWrite: patchWrite ?? { ok: true, reason: null },
-              carrier: disablesOthers,
-              bundleSwitch,
-              restart,
-              refresh,
-            })
+            pendingRollbacks.clear()
+            const result = await applyPluginToggle(name, enabled)
+            sendJson(response, result.ok ? 200 : 502, result)
           })
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
@@ -1450,71 +1459,89 @@ export function mountPluginHubRoutes(
           return
         }
         try {
-          const body = (await readJsonBody(request)) as {
-            action?: unknown
-            name?: unknown
-            newName?: unknown
-            members?: unknown
-            enabled?: unknown
-          }
-          const action = typeof body.action === 'string' ? body.action : ''
-          const known = action === 'create' || action === 'rename' || action === 'delete'
-            || action === 'set-members' || action === 'toggle'
-          if (!known) {
-            sendJson(response, 400, { ok: false, error: 'unknown group action' })
-            return
-          }
-          const installed = new Set(Object.keys(readInstalled(config.profile, activeProfileDir)))
-          let ok = true
-          let error: string | undefined
-          let restartMembers: string[] = []
-          let refreshMembers: string[] = []
-          if (action === 'toggle') {
-            const name = typeof body.name === 'string' ? body.name : ''
-            const enabled = body.enabled === true
-            if (groups[name] === undefined) {
-              sendJson(response, 400, { ok: false, error: 'group not found / 分组不存在' })
+          await withMutationLock(response, 'write', async () => {
+            const body = (await readJsonBody(request)) as {
+              action?: unknown
+              name?: unknown
+              newName?: unknown
+              members?: unknown
+              enabled?: unknown
+            }
+            const action = typeof body.action === 'string' ? body.action : ''
+            const known = action === 'create' || action === 'rename' || action === 'delete'
+              || action === 'set-members' || action === 'toggle'
+            if (!known) {
+              sendJson(response, 400, { ok: false, error: 'unknown group action' })
               return
             }
-            pendingRollbacks.clear()
-            // Batch toggle: on = every installed member enabled, off = every
-            // member disabled. Each member keeps its own persisted flag, so
-            // later individual toggles still work (the group switch itself is
-            // derived state and never stored).
-            const failures: string[] = []
-            for (const member of groups[name]) {
-              if (!installed.has(member)) continue
-              const result = await setPluginEnabled(member, enabled)
-              if (!result.ok) failures.push(member)
-              // Same live-mismatch signal as the single toggle: a member
-              // whose fiber did not follow the switch needs a boot.
-              const liveAfter = liveNames().has(member)
-              if ((enabled && !liveAfter) || (!enabled && liveAfter)) restartMembers.push(member)
-              // Client-part members need a page refresh to show the change.
-              if (packageHasClientPart(activeProfileDir, member)) refreshMembers.push(member)
+            const installed = new Set(Object.keys(readInstalled(config.profile, activeProfileDir)))
+            let ok = true
+            let error: string | undefined
+            let restartMembers: string[] = []
+            let refreshMembers: string[] = []
+            if (action === 'toggle') {
+              const name = typeof body.name === 'string' ? body.name : ''
+              const enabled = body.enabled === true
+              if (groups[name] === undefined) {
+                sendJson(response, 400, { ok: false, error: 'group not found / 分组不存在' })
+                return
+              }
+              // Validate every member before changing any of them, including
+              // protected packages saved by older versions.
+              const protection = groups[name].filter(member => installed.has(member))
+                .map(toggleProtection).find(reason => reason !== null)
+              if (protection !== undefined) {
+                sendJson(response, 403, { ok: false, error: protection })
+                return
+              }
+              pendingRollbacks.clear()
+              // Batch toggle: on = every installed member enabled, off = every
+              // member disabled. Each member keeps its own persisted flag, so
+              // later individual toggles still work (the group switch itself is
+              // derived state and never stored).
+              const failures: string[] = []
+              for (const member of groups[name]) {
+                if (!installed.has(member)) continue
+                const result = await applyPluginToggle(member, enabled)
+                if (!result.ok) failures.push(member)
+                // Same live-mismatch signal as the single toggle: a member
+                // whose fiber did not follow the switch needs a boot.
+                if (result.restart) restartMembers.push(member)
+                // Client-part members need a page refresh to show the change.
+                if (result.refresh) refreshMembers.push(member)
+              }
+              ok = failures.length === 0
+              if (!ok) error = `failed to ${enabled ? 'enable' : 'disable'}: ${failures.join(', ')}`
+            } else {
+              if (action === 'set-members' && Array.isArray(body.members)) {
+                const protection = body.members.filter((member): member is string =>
+                  typeof member === 'string' && installed.has(member) && !SELF_NAMES.has(member))
+                  .map(toggleProtection).find(reason => reason !== null)
+                if (protection !== undefined) {
+                  sendJson(response, 403, { ok: false, error: protection })
+                  return
+                }
+              }
+              const state = { groups, groupOrder }
+              const result = action === 'create' ? createGroup(state, body.name)
+                : action === 'rename' ? renameGroup(state, body.name, body.newName)
+                : action === 'delete' ? deleteGroup(state, body.name)
+                : setGroupMembers(state, body.name, body.members, installed)
+              ok = result.ok
+              error = result.error
             }
-            ok = failures.length === 0
-            if (!ok) error = `failed to ${enabled ? 'enable' : 'disable'}: ${failures.join(', ')}`
-          } else {
-            const state = { groups, groupOrder }
-            const result = action === 'create' ? createGroup(state, body.name)
-              : action === 'rename' ? renameGroup(state, body.name, body.newName)
-              : action === 'delete' ? deleteGroup(state, body.name)
-              : setGroupMembers(state, body.name, body.members, installed)
-            ok = result.ok
-            error = result.error
-          }
-          if (ok) writePluginHubState(activeProfileDir, { disabled, groups, groupOrder })
-          logEvent(ok ? 'info' : 'warn', 'groups',
-            `${action}${typeof body.name === 'string' ? ' ' + body.name : ''}${ok ? '' : ` — ${error ?? ''}`}`)
-          sendJson(response, ok ? 200 : 400, {
-            ok,
-            error,
-            groups,
-            groupOrder,
-            disabled: [...disabled],
-            restartMembers,
-            refreshMembers,
+            if (ok) writePluginHubState(activeProfileDir, { disabled, groups, groupOrder })
+            logEvent(ok ? 'info' : 'warn', 'groups',
+              `${action}${typeof body.name === 'string' ? ' ' + body.name : ''}${ok ? '' : ` — ${error ?? ''}`}`)
+            sendJson(response, ok ? 200 : 400, {
+              ok,
+              error,
+              groups,
+              groupOrder,
+              disabled: [...disabled],
+              restartMembers,
+              refreshMembers,
+            })
           })
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
@@ -2847,6 +2874,15 @@ export function mountPluginHubRoutes(
               pendingRollbacks.delete(id)
               sendJson(response, 400, {
                 error: 'rollback is not available because the profile changed after this operation / 操作后配置已发生变化，回滚不可用',
+              })
+              return
+            }
+            const busyAgents = runningAgentsForGuard()
+            if (busyAgents.length > 0) {
+              sendJson(response, 409, {
+                error: `有 agent 正在运行（${busyAgents.join(', ')}），请等它完成或取消后再回滚。 / Agents are running (${busyAgents.join(', ')}); wait for them to finish or cancel them before rolling back.`,
+                agentsBusy: true,
+                runningAgents: busyAgents,
               })
               return
             }

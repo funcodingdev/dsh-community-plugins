@@ -1,7 +1,7 @@
 {
   "name": "dsh-community-plugins",
   "description": "DeepSeek Harness 社区插件：发现、安装、更新与管理社区插件。",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

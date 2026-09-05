@@ -203,6 +203,8 @@ function statusLine(t: Translate, record: OperationRecord, ahead: number | null)
       return ahead === null || ahead === 0 ? t('opQueued') : `${t('opQueued')} · ${t('opQueuedAhead')} ${String(ahead)}`
     case 'running':
       return record.detail ?? t('opRunning')
+    case 'unknown':
+      return record.reason ?? t('opResultUnknown')
     case 'input':
       return t('opNeedsChoice')
     case 'failed':

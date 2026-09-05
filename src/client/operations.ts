@@ -17,14 +17,15 @@
 export type OperationKind = 'install' | 'update' | 'uninstall'
 
 /**
- * Lifecycle of one operation.
+ * Lifecycle of one operation. `unknown` means status polling observed the
+ * host finish after losing the response, without enough evidence of success.
  *
  * `input` is not a failure: the host already reverted the change (a clash is
  * detected after pnpm resolves, and the package is removed on the spot), so
  * the profile is intact and the queue moves on. It means the operation cannot
  * finish until the user picks an outcome.
  */
-export type OperationState = 'queued' | 'running' | 'input' | 'done' | 'warned' | 'failed'
+export type OperationState = 'queued' | 'running' | 'input' | 'done' | 'warned' | 'failed' | 'unknown'
 
 /** The installed plugins one candidate clashed with, one entry per owner. */
 export interface ConflictGroup {
@@ -47,7 +48,7 @@ export interface OperationRecord {
   detail?: string
   /** Set with `input`: the installed plugins that hold the same entry ids. */
   conflicts?: ConflictGroup[]
-  /** Set with `warned` or `failed`: one sentence naming what went wrong. */
+  /** Explanation for a warned, failed or unknown outcome. */
   reason?: string
   /**
    * Set with `failed` when pnpm refused to run a dependency's build scripts.
@@ -61,9 +62,8 @@ export interface OperationRecord {
 }
 
 /**
- * Visual grouping. Six states are what the code has to distinguish; three are
- * what the panel shows, because a reader scanning icons and colors cannot
- * hold six apart. The distinction inside a bucket is carried by the record's
+ * The panel renders three visual buckets; the status line explains each
+ * operation state. The distinction inside a bucket is carried by the record's
  * own status line, not by another color.
  */
 export type OperationBucket = 'busy' | 'ok' | 'attention'
@@ -73,6 +73,7 @@ const BUCKETS: Record<OperationState, OperationBucket> = {
   running: 'busy',
   input: 'attention',
   failed: 'attention',
+  unknown: 'attention',
   done: 'ok',
   warned: 'ok',
 }
@@ -84,7 +85,7 @@ export function bucketOf(state: OperationState): OperationBucket {
 
 /** Whether a record has stopped moving on its own. */
 export function isSettled(record: OperationRecord): boolean {
-  return record.state === 'done' || record.state === 'warned' || record.state === 'failed'
+  return record.state === 'done' || record.state === 'warned' || record.state === 'failed' || record.state === 'unknown'
 }
 
 /** Whether a record is waiting on the user rather than on the host. */
@@ -136,7 +137,7 @@ export function queuePosition(list: readonly OperationRecord[], id: string): num
 export interface OperationSummary {
   running: number
   queued: number
-  /** Records waiting on a decision. */
+  /** Records waiting on a decision or whose result needs checking. */
   attention: number
   /** Records that finished, however they finished. */
   settled: number
@@ -158,7 +159,10 @@ export function summarize(list: readonly OperationRecord[]): OperationSummary {
   for (const record of list) {
     if (record.state === 'running') running += 1
     else if (record.state === 'queued') queued += 1
-    else if (needsUser(record)) attention += 1
+    else if (record.state === 'unknown') {
+      settled += 1
+      attention += 1
+    } else if (needsUser(record)) attention += 1
     else settled += 1
   }
   return {

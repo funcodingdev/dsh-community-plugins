@@ -1,0 +1,101 @@
+--- a/tests/flows.spec.ts
++++ b/tests/flows.spec.ts
+@@ -3771,3 +3771,79 @@
+     expect(hot.channel).toBeUndefined()
+   })
+ })
++
++
++describe('AUDIT exception reproductions', () => {
++  async function seed() {
++    fake.npm['dsh-loop'] = { latest: '1.0.0', versions: { '1.0.0': {
++      manifest: { dsh: {}, main: 'lib/index.js' }, artifacts: ['lib/index.js'],
++    } } }
++    expect((await bed.dispatch('POST', '/dsh-pluginhub/install', { url: 'https://github.com/o/dsh-loop' })).status).toBe(200)
++    await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'create', name: 'work' })
++    await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'set-members', name: 'work', members: ['dsh-loop'] })
++  }
++  it('AUDIT group toggle must reject protected infrastructure', async () => {
++    const name = '@deepseek-ai/dsh-host-web'
++    writeFileSync(join(fake.profileDir, 'package.json'), JSON.stringify({ dependencies: { [name]: '1.0.0' } }))
++    const entry = { options: { name, disabled: null as boolean | null }, fiber: {} as unknown,
++      update: async (o: { disabled: boolean | null }) => { entry.options.disabled = o.disabled; entry.fiber = o.disabled ? undefined : {} } }
++    bed.loaderEntries.push(entry)
++    expect((await bed.dispatch('POST', '/dsh-pluginhub/toggle', { name, enabled: false })).status).toBe(403)
++    await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'create', name: 'infra' })
++    await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'set-members', name: 'infra', members: [name] })
++    const result = await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'toggle', name: 'infra', enabled: false })
++    expect({ status: result.status, live: entry.fiber !== undefined }).toEqual({ status: 403, live: true })
++  })
++  it('AUDIT groups must respect an in-flight install lock', async () => {
++    await seed()
++    let release!: () => void
++    fake.gate = new Promise<void>(resolve => { release = resolve })
++    const pending = bed.dispatch('POST', '/dsh-pluginhub/update', { name: 'dsh-loop' })
++    await vi.waitFor(() => expect(fake.running).toBe(true))
++    let result
++    try { result = await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'toggle', name: 'work', enabled: false }) }
++    finally { release(); fake.gate = null; await pending }
++    expect(result.status).toBe(409)
++  })
++  it('AUDIT group enable must clear an individual durable disable', async () => {
++    await seed()
++    const root = join(fake.profileDir, 'node_modules', 'dsh-loop')
++    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'dsh-loop', version: '1.0.0', main: 'lib/index.js', dsh: { bundle: { patch: './cordis.patch.yml' } } }))
++    writeFileSync(join(root, 'cordis.patch.yml'), '- insert:\n    - id: loop-row\n      name: dsh-loop\n')
++    const off = await bed.dispatch('POST', '/dsh-pluginhub/toggle', { name: 'dsh-loop', enabled: false })
++    expect(off.status).toBe(200)
++    const before = await bed.dispatch('GET', '/dsh-pluginhub/installed')
++    expect(before.json.patchDisabled).toContain('dsh-loop')
++    expect((await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'toggle', name: 'work', enabled: true })).status).toBe(200)
++    const after = await bed.dispatch('GET', '/dsh-pluginhub/installed')
++    expect(after.json.patchDisabled).not.toContain('dsh-loop')
++  })
++  it('AUDIT rollback must reject a newly running agent', async () => {
++    let running = false
++    bed.dispose()
++    bed = createTestbed({}, undefined, { list: () => running ? [{ id: 'main', status: 'running' }] : [] })
++    const hostPeerDir = join(fake.profileDir, 'node_modules', '@deepseek-ai', 'dsh-settings')
++    mkdirSync(hostPeerDir, { recursive: true })
++    writeFileSync(join(hostPeerDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-settings', version: '0.1.0-rc.6' }))
++    fake.npm['dsh-loop'] = { latest: '1.0.0', versions: { '1.0.0': {
++      manifest: { dsh: {}, main: 'lib/index.js', peerDependencies: { '@deepseek-ai/dsh-settings': '^0.1.0-rc.7' } }, artifacts: ['lib/index.js'],
++    } } }
++    const install = await bed.dispatch('POST', '/dsh-pluginhub/install', { url: 'https://github.com/o/dsh-loop' })
++    expect(install.json.compatibility.rollbackId).toBeTruthy()
++    running = true
++    expect((await bed.dispatch('POST', '/dsh-pluginhub/uninstall', { name: 'dsh-loop' })).status).toBe(409)
++    const count = fake.calls.length
++    const result = await bed.dispatch('POST', '/dsh-pluginhub/rollback', { rollbackId: install.json.compatibility.rollbackId })
++    expect({ status: result.status, calls: fake.calls.length - count, installed: installedSpec('dsh-loop') !== undefined }).toEqual({ status: 409, calls: 0, installed: true })
++  })
++  it('AUDIT cancelling hoist rebuild must remain cancelled', async () => {
++    const { withHoistRecovery } = await import('../src/install.ts')
++    let calls = 0
++    const result = await withHoistRecovery(async () => {
++      calls++
++      return calls === 1 ? { exitCode: 1, timedOut: false, cancelled: false, stdout: '', stderr: 'ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF' }
++        : { exitCode: null, timedOut: false, cancelled: true, stdout: '', stderr: '' }
++    }, 'web', ['add', 'dsh-loop'], fake.profileDir)
++    expect({ cancelled: result.cancelled, calls }).toEqual({ cancelled: true, calls: 2 })
++  })
++})
+--- a/tests/client/pluginhub-section.client.spec.tsx
++++ b/tests/client/pluginhub-section.client.spec.tsx
+@@ -2413,7 +2413,7 @@
+ })
+ 
+ describe('lost install response (#100)', () => {
+-  it('a rejected install fetch keeps the pending state and the poll recovery lands the success — no false failure', async () => {
++  it('AUDIT a rejected install fetch keeps the pending state and the poll recovery lands the success — no false failure', async () => {
+     vi.useFakeTimers()
+     try {
+       // Phase 1: the /install connection DIES (proxy/loopback reset) while
+@@ -2455,6 +2455,7 @@
+       await vi.advanceTimersByTimeAsync(4500)
+       await vi.waitFor(() => {
+         expect(sessionStorage.getItem('dsph-pending')).toBeNull()
++        expect(screen.queryByRole('button', { name: `${en.opInstalling} 1/1` })).toBeNull()
+         expect(screen.queryByText(new RegExp(en.installFail))).toBeNull()
+       })
+     } finally {

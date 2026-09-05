@@ -15,7 +15,7 @@ const rec = (id: string, state: OperationState, extra: Partial<OperationRecord> 
   ({ id, kind: 'install', name: id, state, ...extra })
 
 describe('operation state grouping', () => {
-  it('collapses six states into the three the panel renders', () => {
+  it('collapses operation states into the three the panel renders', () => {
     // The panel distinguishes buckets by icon and color; the status line
     // carries the rest. Six colors would not be readable.
     expect(bucketOf('queued')).toBe('busy')
@@ -24,6 +24,7 @@ describe('operation state grouping', () => {
     expect(bucketOf('warned')).toBe('ok')
     expect(bucketOf('input')).toBe('attention')
     expect(bucketOf('failed')).toBe('attention')
+    expect(bucketOf('unknown')).toBe('attention')
   })
 
   it('does not count a decision as finished', () => {
@@ -120,4 +121,12 @@ describe('patch and card lookup', () => {
     expect(recordForUrl(list, 'v')?.id).toBe('other')
     expect(recordForUrl(list, 'missing')).toBeNull()
   })
+})
+
+
+it('unknown outcomes stop the progress indicator without offering conflict replacement', () => {
+  const task = rec('lost-response', 'unknown')
+  expect(summarize([task])).toMatchObject({ running: 0, attention: 1, settled: 1, total: 1 })
+  expect(needsUser(task)).toBe(false)
+  expect(clearSettled([task])).toEqual([])
 })

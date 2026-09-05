@@ -3771,3 +3771,110 @@ describe('the dev channel is an ordinary choice', () => {
     expect(hot.channel).toBeUndefined()
   })
 })
+
+
+describe('group mutation and rollback guards', () => {
+  async function seed() {
+    fake.npm['dsh-loop'] = { latest: '1.0.0', versions: { '1.0.0': {
+      manifest: { dsh: {}, main: 'lib/index.js' }, artifacts: ['lib/index.js'],
+    } } }
+    expect((await bed.dispatch('POST', '/dsh-pluginhub/install', { url: 'https://github.com/o/dsh-loop' })).status).toBe(200)
+    await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'create', name: 'work' })
+    await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'set-members', name: 'work', members: ['dsh-loop'] })
+  }
+  it('group toggle must reject protected infrastructure', async () => {
+    const name = '@deepseek-ai/dsh-host-web'
+    writeFileSync(join(fake.profileDir, 'package.json'), JSON.stringify({ dependencies: { [name]: '1.0.0' } }))
+    const entry = { options: { name, disabled: null as boolean | null }, fiber: {} as unknown,
+      update: async (o: { disabled: boolean | null }) => { entry.options.disabled = o.disabled; entry.fiber = o.disabled ? undefined : {} } }
+    bed.loaderEntries.push(entry)
+    expect((await bed.dispatch('POST', '/dsh-pluginhub/toggle', { name, enabled: false })).status).toBe(403)
+    await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'create', name: 'infra' })
+    expect((await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'set-members', name: 'infra', members: [name] })).status).toBe(403)
+    // Old saved groups must be checked before even the first healthy member changes.
+    await seed()
+    hot.groups.infra = ['dsh-loop', name]
+    const result = await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'toggle', name: 'infra', enabled: false })
+    expect({ status: result.status, live: entry.fiber !== undefined }).toEqual({ status: 403, live: true })
+    expect(hot.disabled.has('dsh-loop')).toBe(false)
+  })
+  it.each(['create', 'rename', 'delete', 'set-members', 'toggle'])('group %s respects an in-flight operation lock', async (action) => {
+    await seed()
+    let release!: () => void
+    fake.gate = new Promise<void>(resolve => { release = resolve })
+    const pending = bed.dispatch('POST', '/dsh-pluginhub/update', { name: 'dsh-loop' })
+    await vi.waitFor(() => expect(fake.running).toBe(true))
+    let result
+    try { result = await bed.dispatch('POST', '/dsh-pluginhub/groups', { action, name: 'work', newName: 'renamed', members: [], enabled: false }) }
+    finally { release(); fake.gate = null; await pending }
+    expect(result.status).toBe(409)
+  })
+  it('group enable must clear an individual durable disable', async () => {
+    await seed()
+    const root = join(fake.profileDir, 'node_modules', 'dsh-loop')
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'dsh-loop', version: '1.0.0', main: 'lib/index.js', dsh: { bundle: { patch: './cordis.patch.yml' } } }))
+    writeFileSync(join(root, 'cordis.patch.yml'), '- insert:\n    - id: loop-row\n      name: dsh-loop\n')
+    const off = await bed.dispatch('POST', '/dsh-pluginhub/toggle', { name: 'dsh-loop', enabled: false })
+    expect(off.status).toBe(200)
+    const before = await bed.dispatch('GET', '/dsh-pluginhub/installed')
+    expect(before.json.patchDisabled).toContain('dsh-loop')
+    expect((await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'toggle', name: 'work', enabled: true })).status).toBe(200)
+    const after = await bed.dispatch('GET', '/dsh-pluginhub/installed')
+    expect(after.json.patchDisabled).not.toContain('dsh-loop')
+  })
+  it('rollback must reject a newly running agent', async () => {
+    let running = false
+    bed.dispose()
+    bed = createTestbed({}, undefined, { list: () => running ? [{ id: 'main', status: 'running' }] : [] })
+    const hostPeerDir = join(fake.profileDir, 'node_modules', '@deepseek-ai', 'dsh-settings')
+    mkdirSync(hostPeerDir, { recursive: true })
+    writeFileSync(join(hostPeerDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-settings', version: '0.1.0-rc.6' }))
+    fake.npm['dsh-loop'] = { latest: '1.0.0', versions: { '1.0.0': {
+      manifest: { dsh: {}, main: 'lib/index.js', peerDependencies: { '@deepseek-ai/dsh-settings': '^0.1.0-rc.7' } }, artifacts: ['lib/index.js'],
+    } } }
+    const install = await bed.dispatch('POST', '/dsh-pluginhub/install', { url: 'https://github.com/o/dsh-loop' })
+    expect(install.json.compatibility.rollbackId).toBeTruthy()
+    running = true
+    expect((await bed.dispatch('POST', '/dsh-pluginhub/uninstall', { name: 'dsh-loop' })).status).toBe(409)
+    const count = fake.calls.length
+    const result = await bed.dispatch('POST', '/dsh-pluginhub/rollback', { rollbackId: install.json.compatibility.rollbackId })
+    expect({ status: result.status, calls: fake.calls.length - count, installed: installedSpec('dsh-loop') !== undefined }).toEqual({ status: 409, calls: 0, installed: true })
+    expect(result.json.agentsBusy).toBe(true)
+    running = false
+    expect((await bed.dispatch('POST', '/dsh-pluginhub/rollback', { rollbackId: install.json.compatibility.rollbackId })).json.rolledBack).toBe(true)
+  })
+
+  it('group carrier switches update the bundle stack and require restart', async () => {
+    await seed()
+    const root = join(fake.profileDir, 'node_modules', 'dsh-loop')
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'dsh-loop', version: '1.0.0', main: 'lib/index.js', dsh: { bundle: { patch: './cordis.patch.yml' } } }))
+    writeFileSync(join(root, 'cordis.patch.yml'), '- id: other-backend\n  disabled: true\n- insert:\n    - id: loop-row\n      name: dsh-loop\n')
+    const file = join(fake.profileDir, 'package.json')
+    const manifest = JSON.parse(readFileSync(file, 'utf8'))
+    manifest.dsh = { profile: { bundles: ['dsh-loop'] } }
+    writeFileSync(file, JSON.stringify(manifest))
+    const off = await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'toggle', name: 'work', enabled: false })
+    expect(off.status).toBe(200)
+    expect(off.json.restartMembers).toEqual(['dsh-loop'])
+    expect(JSON.parse(readFileSync(file, 'utf8')).dsh.profile.bundles).not.toContain('dsh-loop')
+    const on = await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'toggle', name: 'work', enabled: true })
+    expect(on.status).toBe(200)
+    expect(on.json.restartMembers).toEqual(['dsh-loop'])
+    expect(JSON.parse(readFileSync(file, 'utf8')).dsh.profile.bundles).toContain('dsh-loop')
+    expect((await bed.dispatch('GET', '/dsh-pluginhub/installed')).json.patchDisabled).not.toContain('dsh-loop')
+  })
+
+  it('does not report a successful group toggle when its patch write is refused', async () => {
+    await seed()
+    const root = join(fake.profileDir, 'node_modules', 'dsh-loop')
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'dsh-loop', version: '1.0.0', main: 'lib/index.js', dsh: { bundle: { patch: './cordis.patch.yml' } } }))
+    writeFileSync(join(root, 'cordis.patch.yml'), '- insert:\n    - id: loop-row\n      name: dsh-loop\n')
+    const patch = join(fake.profileDir, 'cordis.patch.yml')
+    writeFileSync(patch, 'malformed: [')
+    const off = await bed.dispatch('POST', '/dsh-pluginhub/groups', { action: 'toggle', name: 'work', enabled: false })
+    expect(off.json.ok).toBe(false)
+    expect(off.json.error).toContain('dsh-loop')
+    expect(readFileSync(patch, 'utf8')).toBe('malformed: [')
+  })
+
+})

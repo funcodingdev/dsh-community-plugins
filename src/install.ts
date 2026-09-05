@@ -103,7 +103,9 @@ export async function withHoistRecovery(
       // --no-frozen-lockfile: the pluginhub runs pnpm with CI=true (TTY hangs),
       // where a lockfile written by the old major would otherwise be refused.
       const rebuild = await run(profile, ['install', '--no-frozen-lockfile'])
-      if (ok(rebuild)) result = await run(profile, pluginArgs)
+      // A cancelled/failed rebuild is the latest outcome. Keeping the first
+      // hoist error here would turn cancellation into failure cleanup/rollback.
+      result = ok(rebuild) ? await run(profile, pluginArgs) : rebuild
     } else if (
       failure?.code === 'release-age-violation'
       && (pluginArgs[0] === 'add' || pluginArgs[0] === 'remove')

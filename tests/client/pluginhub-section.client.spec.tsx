@@ -1216,8 +1216,8 @@ describe('stuck pending recovery (#32)', () => {
       await vi.advanceTimersByTimeAsync(2100)
       await vi.advanceTimersByTimeAsync(2100)
       expect(sessionStorage.getItem('dsph-pending')).toBeNull()
-      expect(screen.getByText(new RegExp(en.installFail))).toBeTruthy()
-      expect(panel?.textContent).not.toContain('dsh-loop')
+      expect(screen.getAllByText(new RegExp(en.installFail)).length).toBeGreaterThan(0)
+      expect(panel?.textContent).toContain(en.installFail)
     } finally {
       vi.useRealTimers()
     }
@@ -1257,7 +1257,7 @@ describe('lost install progress (config page reopened)', () => {
       await vi.advanceTimersByTimeAsync(2100)
       await vi.waitFor(() => {
         expect(sessionStorage.getItem('dsph-pending')).toBeNull()
-        expect(panel!.textContent).not.toContain('dsh-loop')
+        expect(panel!.textContent).toContain(en.opResultUnknown)
       })
     } finally {
       vi.useRealTimers()
@@ -1306,7 +1306,7 @@ describe('lost update progress (config page reopened)', () => {
       await vi.waitFor(() => {
         expect(sessionStorage.getItem('dsph-updating')).toBeNull()
         expect(screen.queryByRole('button', { name: en.updating })).toBeNull()
-        expect(panel!.textContent).not.toContain('dsh-loop')
+        expect(panel!.textContent).toContain(en.opResultUnknown)
       })
     } finally {
       vi.useRealTimers()
@@ -2107,6 +2107,8 @@ describe('status-poll / install-response race (#73)', () => {
         // The premature entry must also be persisted under the current boot.
         expect(sessionStorage.getItem('dsph-restart')).toContain('dsh-loop')
       })
+      fireEvent.click(screen.getByRole('button', { name: `1 ${en.opNeedsYou}` }))
+      expect(screen.getByText(en.opResultUnknown)).toBeTruthy()
       // The real /install response arrives: hot mount confirmed.
       resolveInstall(new Response(JSON.stringify({
         ok: true,
@@ -2120,6 +2122,8 @@ describe('status-poll / install-response race (#73)', () => {
         expect(screen.queryAllByText(re(en.restartBanner)).length).toBe(0)
         expect(sessionStorage.getItem('dsph-restart')).toBeNull()
       })
+      expect(screen.queryByText(en.opResultUnknown)).toBeNull()
+      expect(screen.getByText(en.opDone)).toBeTruthy()
       // Stable counterpart: the (now-merged) refresh banner still shows the live mount.
       expect(screen.getAllByText(re(en.refreshBanner)).length).toBeGreaterThan(0)
       // A same-boot remount must not resurrect the banner from stale storage.
@@ -2455,8 +2459,57 @@ describe('lost install response (#100)', () => {
       await vi.advanceTimersByTimeAsync(4500)
       await vi.waitFor(() => {
         expect(sessionStorage.getItem('dsph-pending')).toBeNull()
+        expect(screen.queryByRole('button', { name: `${en.opInstalling} 1/1` })).toBeNull()
         expect(screen.queryByText(new RegExp(en.installFail))).toBeNull()
+        expect(screen.getByRole('button', { name: `1 ${en.opNeedsYou}` })).toBeTruthy()
       })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('lost update response in the current page', () => {
+  it.each([false, true])('ends a disconnected update (batch=%s) without claiming success', async (batch) => {
+    vi.useFakeTimers()
+    try {
+      let active = true
+      let statusFails = false
+      const attempts: unknown[] = []
+      const installed = batch ? { 'dsh-loop': '^1.0.0', 'dsh-notify': '^1.0.0' } : { 'dsh-loop': '^1.0.0' }
+      const base = stubFetch({
+        '/dsh-pluginhub/installed': { installed, live: [] },
+        '/dsh-pluginhub/updates': { updates: Object.fromEntries(Object.keys(installed).map(name => [name, { kind: 'npm', version: '1.0.0', latest: '1.1.0', updateAvailable: true }])) },
+        '/dsh-pluginhub/status': () => statusFails ? { __status: 503, error: 'status unavailable' } : { active, busy: active, pnpm: true, boot: 'boot-1', installed },
+      })
+      vi.stubGlobal('fetch', (input: unknown, init?: RequestInit) => {
+        if (String(input) !== '/dsh-pluginhub/update') return base(input, init)
+        attempts.push(init?.body)
+        return Promise.reject(new TypeError('connection lost'))
+      })
+      render(<PluginHubSection {...props()} />)
+      fireEvent.click(screen.getByRole('button', { name: re(en.tabInstalled) }))
+      const buttonName = batch ? /Update all \(2\)/ : en.update
+      await vi.waitFor(() => { screen.getByRole('button', { name: buttonName }) })
+      fireEvent.click(screen.getByRole('button', { name: buttonName }))
+      await vi.advanceTimersByTimeAsync(2100)
+      expect(screen.getByRole('button', { name: `${en.opInstalling} 1/1` })).toBeTruthy()
+      active = false
+      statusFails = true
+      await vi.advanceTimersByTimeAsync(4200)
+      expect(screen.getByRole('button', { name: `${en.opInstalling} 1/1` })).toBeTruthy()
+      expect(attempts).toHaveLength(1)
+      statusFails = false
+      await vi.advanceTimersByTimeAsync(4200)
+      await vi.waitFor(() => {
+        expect(sessionStorage.getItem('dsph-updating')).toBeNull()
+        expect(screen.queryByRole('button', { name: `${en.opInstalling} 1/1` })).toBeNull()
+      })
+      fireEvent.click(screen.getByRole('button', { name: `1 ${en.opNeedsYou}` }))
+      expect(screen.getByText(en.opResultUnknown)).toBeTruthy()
+      expect(screen.queryByText(en.opDone)).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: en.opClear }))
+      expect(screen.queryByText(en.opResultUnknown)).toBeNull()
     } finally {
       vi.useRealTimers()
     }

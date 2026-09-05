@@ -179,6 +179,7 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 			opQueued: "排队中",
 			opQueuedAhead: "前面还有",
 			opRunning: "正在处理",
+			opResultUnknown: "操作已结束，但连接中断，结果待确认。请检查已安装插件的状态。",
 			opNeedsChoice: "无法安装 · 已自动撤销，未改动任何插件",
 			opDone: "已完成",
 			opDoneRefresh: "已安装 · 刷新页面后生效",
@@ -422,6 +423,7 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 			opQueued: "Queued",
 			opQueuedAhead: "ahead:",
 			opRunning: "In progress",
+			opResultUnknown: "The operation ended, but the connection was lost. Check the installed plugin status to confirm the result.",
 			opNeedsChoice: "Cannot install · reverted automatically, nothing changed",
 			opDone: "Done",
 			opDoneRefresh: "Installed · refresh the page to apply",
@@ -36153,6 +36155,7 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 			running: "busy",
 			input: "attention",
 			failed: "attention",
+			unknown: "attention",
 			done: "ok",
 			warned: "ok"
 		};
@@ -36162,7 +36165,7 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 		}
 		/** Whether a record has stopped moving on its own. */
 		function isSettled(record) {
-			return record.state === "done" || record.state === "warned" || record.state === "failed";
+			return record.state === "done" || record.state === "warned" || record.state === "failed" || record.state === "unknown";
 		}
 		/** Whether a record is waiting on the user rather than on the host. */
 		function needsUser(record) {
@@ -36215,7 +36218,10 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 			let settled = 0;
 			for (const record of list) if (record.state === "running") running += 1;
 			else if (record.state === "queued") queued += 1;
-			else if (needsUser(record)) attention += 1;
+			else if (record.state === "unknown") {
+				settled += 1;
+				attention += 1;
+			} else if (needsUser(record)) attention += 1;
 			else settled += 1;
 			return {
 				running,
@@ -36424,6 +36430,7 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 			switch (record.state) {
 				case "queued": return ahead === null || ahead === 0 ? t("opQueued") : `${t("opQueued")} · ${t("opQueuedAhead")} ${String(ahead)}`;
 				case "running": return record.detail ?? t("opRunning");
+				case "unknown": return record.reason ?? t("opResultUnknown");
 				case "input": return t("opNeedsChoice");
 				case "failed": return record.reason ?? t("installFail");
 				case "warned": return record.reason ?? t("opDone");
@@ -37263,10 +37270,10 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 			*/
 			const [records, setRecords] = (0, react.useState)([]);
 			const recordSeq = (0, react.useRef)(0);
-			/** The synthetic install task rebuilt from dsph-pending after a remount. */
-			const recoveredInstall = (0, react.useRef)(null);
-			/** The synthetic task rebuilt from dsph-updating after this section remounts. */
-			const recoveredUpdateRecordId = (0, react.useRef)(null);
+			/** Current install, started here or restored from a session marker. */
+			const trackedInstall = (0, react.useRef)(null);
+			/** Current update, started here or restored from a session marker. */
+			const trackedUpdateRecordId = (0, react.useRef)(null);
 			/** Raised by the card marker, so "查看详情" lands on the record itself. */
 			const [operationsOpen, setOperationsOpen] = (0, react.useState)(false);
 			const openOperations = (0, react.useCallback)(() => setOperationsOpen(true), []);
@@ -37294,6 +37301,14 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 				recordSeq.current += 1;
 				return `op-${String(recordSeq.current)}`;
 			}, []);
+			const settlePolledRecord = (0, react.useCallback)((id, failed = false) => {
+				setRecords((list) => patch(list, id, {
+					state: failed ? "failed" : "unknown",
+					reason: failed ? t("installFail") : t("opResultUnknown"),
+					detail: void 0,
+					percent: void 0
+				}));
+			}, [t]);
 			const [replacing, setReplacing] = (0, react.useState)(false);
 			/** Shared by every screenshot source (card thumbnail, dialog strip). */
 			const [lightbox, setLightbox] = (0, react.useState)(null);
@@ -37655,7 +37670,7 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 				const pending = readSession("dsph-pending");
 				if (pending !== null && typeof pending.url === "string") {
 					setBusyUrl(pending.url);
-					recoveredInstall.current = {
+					trackedInstall.current = {
 						id: `recovered-install:${pending.url}`,
 						url: pending.url,
 						...typeof pending.name === "string" && pending.name !== "" ? { name: pending.name } : {}
@@ -37665,7 +37680,7 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 				if (updating !== null && typeof updating.name === "string" && updating.name !== "") {
 					setUpdatingName(updating.name);
 					const id = `recovered-update:${updating.name}`;
-					recoveredUpdateRecordId.current = id;
+					trackedUpdateRecordId.current = id;
 					setRecords((list) => list.some((record) => record.kind === "update" && record.name === updating.name && record.state === "running") ? list : enqueue(list, {
 						id,
 						kind: "update",
@@ -37675,7 +37690,7 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 				}
 			}, []);
 			(0, react.useEffect)(() => {
-				const recovered = recoveredInstall.current;
+				const recovered = trackedInstall.current;
 				if (recovered === null) return;
 				const name = recovered.name ?? data?.plugins.find((plugin) => plugin.url === recovered.url)?.name;
 				if (name === void 0) return;
@@ -37698,8 +37713,13 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 					setCancelling(false);
 					return;
 				}
+				let stopped = false;
 				const timer = setInterval(() => {
-					fetch(api("/dsh-pluginhub/status"), { cache: "no-store" }).then((res) => res.json()).then((status) => {
+					fetch(api("/dsh-pluginhub/status"), { cache: "no-store" }).then((res) => {
+						if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
+						return res.json();
+					}).then((status) => {
+						if (stopped) return;
 						setHostBusy(status.busy === true);
 						setDebuggerLatch(typeof status.debugger === "string" ? status.debugger : null);
 						if (status.active) {
@@ -37734,20 +37754,20 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 								if (data !== null && data.plugins.some((p) => p.url === busyUrl && isInstalled(p, statusInstalled, repoIdentities, data.plugins, repoHints))) {
 									idleStrikes.current = 0;
 									sessionStorage.removeItem("dsph-pending");
-									const recovered = recoveredInstall.current;
+									const recovered = trackedInstall.current;
 									if (recovered !== null) {
-										setRecords((list) => drop(list, recovered.id));
-										recoveredInstall.current = null;
+										settlePolledRecord(recovered.id);
+										trackedInstall.current = null;
 									}
 									setDoneUrls((urls) => urls.includes(busyUrl) ? urls : urls.concat(busyUrl));
 									setBusyUrl(null);
 								} else if (++idleStrikes.current >= 2) {
 									idleStrikes.current = 0;
 									sessionStorage.removeItem("dsph-pending");
-									const recovered = recoveredInstall.current;
+									const recovered = trackedInstall.current;
 									if (recovered !== null) {
-										setRecords((list) => drop(list, recovered.id));
-										recoveredInstall.current = null;
+										settlePolledRecord(recovered.id, true);
+										trackedInstall.current = null;
 									}
 									setBusyUrl(null);
 									setInstallError(t("installFail"));
@@ -37757,10 +37777,10 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 								if (++updateIdleStrikes.current >= 2) {
 									updateIdleStrikes.current = 0;
 									sessionStorage.removeItem("dsph-updating");
-									const recoveredId = recoveredUpdateRecordId.current;
+									const recoveredId = trackedUpdateRecordId.current;
 									if (recoveredId !== null) {
-										setRecords((list) => drop(list, recoveredId));
-										recoveredUpdateRecordId.current = null;
+										settlePolledRecord(recoveredId);
+										trackedUpdateRecordId.current = null;
 									}
 									setUpdatingName(null);
 									refreshInstalled();
@@ -37769,7 +37789,10 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 						}
 					}).catch(() => {});
 				}, 2e3);
-				return () => clearInterval(timer);
+				return () => {
+					stopped = true;
+					clearInterval(timer);
+				};
 			}, [
 				busyUrl,
 				updatingName,
@@ -37777,7 +37800,8 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 				installed,
 				repoIdentities,
 				repoHints,
-				refreshInstalled
+				refreshInstalled,
+				settlePolledRecord
 			]);
 			(0, react.useLayoutEffect)(() => {
 				const el = bodyRef.current;
@@ -37847,6 +37871,11 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 				setActivationWarnings([]);
 				setBusyUrl(plugin.url);
 				const recordId = nextRecordId();
+				trackedInstall.current = {
+					id: recordId,
+					url: plugin.url,
+					name: plugin.name
+				};
 				setRecords((list) => enqueue(list, {
 					id: recordId,
 					kind: "install",
@@ -37866,8 +37895,11 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 					status: res.status,
 					body
 				}))).then(({ status, body }) => {
-					setBusyUrl(null);
-					sessionStorage.removeItem("dsph-pending");
+					if (trackedInstall.current?.id === recordId) {
+						trackedInstall.current = null;
+						setBusyUrl(null);
+						sessionStorage.removeItem("dsph-pending");
+					}
 					if (body.cancelled === true) {
 						setRecords((list) => drop(list, recordId));
 						refreshInstalled();
@@ -38090,6 +38122,7 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 				updateIdleStrikes.current = 0;
 				sessionStorage.setItem("dsph-updating", JSON.stringify({ name }));
 				const updateRecordId = nextRecordId();
+				trackedUpdateRecordId.current = updateRecordId;
 				setRecords((list) => enqueue(list, {
 					id: updateRecordId,
 					kind: "update",
@@ -38108,8 +38141,11 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 					status: res.status,
 					body
 				}))).then(({ status, body }) => {
-					sessionStorage.removeItem("dsph-updating");
-					setUpdatingName(null);
+					if (trackedUpdateRecordId.current === updateRecordId) {
+						trackedUpdateRecordId.current = null;
+						sessionStorage.removeItem("dsph-updating");
+						setUpdatingName(null);
+					}
 					if (body.cancelled === true) {
 						setRecords((list) => drop(list, updateRecordId));
 						refreshInstalled();
@@ -38164,7 +38200,9 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 						}));
 						setInstallError((restore ? t("restoreFail") : t("updateFail")) + ": " + name + " — " + detail.trim().slice(-600));
 					}
-				}).catch(() => {});
+				}).catch(() => {
+					return false;
+				});
 			}, [refreshInstalled, t]);
 			const askRestore = (0, react.useCallback)((name) => {
 				const spec = installed[name];
@@ -38355,7 +38393,10 @@ window.__ModuleLoader__.load({ id: "dsh-community-plugins", factory: (require) =
 						setUpdatingAll(false);
 						return;
 					}
-					doUpdate(name).then(next, next);
+					doUpdate(name).then((responseReceived) => {
+						if (responseReceived === false) setUpdatingAll(false);
+						else next();
+					}, () => setUpdatingAll(false));
 				};
 				next();
 			}, [reminderBatchUpdatableNames, doUpdate]);

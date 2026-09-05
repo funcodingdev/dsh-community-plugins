@@ -768,10 +768,10 @@ export function PluginHubSection(props: PluginHubSectionProps) {
    */
   const [records, setRecords] = useState<OperationRecord[]>([])
   const recordSeq = useRef(0)
-  /** The synthetic install task rebuilt from dsph-pending after a remount. */
-  const recoveredInstall = useRef<{ id: string; url: string; name?: string } | null>(null)
-  /** The synthetic task rebuilt from dsph-updating after this section remounts. */
-  const recoveredUpdateRecordId = useRef<string | null>(null)
+  /** Current install, started here or restored from a session marker. */
+  const trackedInstall = useRef<{ id: string; url: string; name?: string } | null>(null)
+  /** Current update, started here or restored from a session marker. */
+  const trackedUpdateRecordId = useRef<string | null>(null)
   /** Raised by the card marker, so "查看详情" lands on the record itself. */
   const [operationsOpen, setOperationsOpen] = useState(false)
   const openOperations = useCallback(() => setOperationsOpen(true), [])
@@ -796,6 +796,16 @@ export function PluginHubSection(props: PluginHubSectionProps) {
     recordSeq.current += 1
     return `op-${String(recordSeq.current)}`
   }, [])
+  // Status proves the host is idle, but does not carry the operation result.
+  // Retain an honest terminal record until a late HTTP response can refine it.
+  const settlePolledRecord = useCallback((id: string, failed = false) => {
+    setRecords(list => patchRecord(list, id, {
+      state: failed ? 'failed' : 'unknown',
+      reason: failed ? t('installFail') : t('opResultUnknown'),
+      detail: undefined,
+      percent: undefined,
+    }))
+  }, [t])
   const [replacing, setReplacing] = useState(false)
   /** Shared by every screenshot source (card thumbnail, dialog strip). */
   const [lightbox, setLightbox] = useState<{ shots: string[]; index: number } | null>(null)
@@ -1207,7 +1217,7 @@ export function PluginHubSection(props: PluginHubSectionProps) {
     const pending = readSession('dsph-pending')
     if (pending !== null && typeof pending.url === 'string') {
       setBusyUrl(pending.url)
-      recoveredInstall.current = {
+      trackedInstall.current = {
         id: `recovered-install:${pending.url}`,
         url: pending.url,
         ...(typeof pending.name === 'string' && pending.name !== '' ? { name: pending.name } : {}),
@@ -1221,7 +1231,7 @@ export function PluginHubSection(props: PluginHubSectionProps) {
     if (updating !== null && typeof updating.name === 'string' && updating.name !== '') {
       setUpdatingName(updating.name)
       const id = `recovered-update:${updating.name}`
-      recoveredUpdateRecordId.current = id
+      trackedUpdateRecordId.current = id
       setRecords(list => list.some(record =>
         record.kind === 'update' && record.name === updating.name && record.state === 'running')
         ? list
@@ -1232,7 +1242,7 @@ export function PluginHubSection(props: PluginHubSectionProps) {
   // New markers carry the name and recover immediately. Older markers only
   // carried the URL, so wait for the catalog and resolve the same task from it.
   useEffect(() => {
-    const recovered = recoveredInstall.current
+    const recovered = trackedInstall.current
     if (recovered === null) return
     const name = recovered.name ?? data?.plugins.find(plugin => plugin.url === recovered.url)?.name
     if (name === undefined) return
@@ -1260,10 +1270,15 @@ export function PluginHubSection(props: PluginHubSectionProps) {
       setCancelling(false)
       return
     }
+    let stopped = false
     const timer = setInterval(() => {
       fetch(api('/dsh-pluginhub/status'), { cache: 'no-store' })
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
+          return res.json()
+        })
         .then(status => {
+          if (stopped) return
           setHostBusy(status.busy === true)
           setDebuggerLatch(typeof status.debugger === 'string' ? status.debugger : null)
           if (status.active) {
@@ -1308,10 +1323,10 @@ export function PluginHubSection(props: PluginHubSectionProps) {
               if (nowInstalled) {
                 idleStrikes.current = 0
                 sessionStorage.removeItem('dsph-pending')
-                const recovered = recoveredInstall.current
+                const recovered = trackedInstall.current
                 if (recovered !== null) {
-                  setRecords(list => drop(list, recovered.id))
-                  recoveredInstall.current = null
+                  settlePolledRecord(recovered.id)
+                  trackedInstall.current = null
                 }
                 setDoneUrls(urls => urls.includes(busyUrl) ? urls : urls.concat(busyUrl))
                 setBusyUrl(null)
@@ -1321,10 +1336,10 @@ export function PluginHubSection(props: PluginHubSectionProps) {
                 // button says "installing" forever — across reloads (#32).
                 idleStrikes.current = 0
                 sessionStorage.removeItem('dsph-pending')
-                const recovered = recoveredInstall.current
+                const recovered = trackedInstall.current
                 if (recovered !== null) {
-                  setRecords(list => drop(list, recovered.id))
-                  recoveredInstall.current = null
+                  settlePolledRecord(recovered.id, true)
+                  trackedInstall.current = null
                 }
                 setBusyUrl(null)
                 setInstallError(t('installFail'))
@@ -1341,10 +1356,10 @@ export function PluginHubSection(props: PluginHubSectionProps) {
               if (++updateIdleStrikes.current >= 2) {
                 updateIdleStrikes.current = 0
                 sessionStorage.removeItem('dsph-updating')
-                const recoveredId = recoveredUpdateRecordId.current
+                const recoveredId = trackedUpdateRecordId.current
                 if (recoveredId !== null) {
-                  setRecords(list => drop(list, recoveredId))
-                  recoveredUpdateRecordId.current = null
+                  settlePolledRecord(recoveredId)
+                  trackedUpdateRecordId.current = null
                 }
                 setUpdatingName(null)
                 refreshInstalled()
@@ -1356,8 +1371,11 @@ export function PluginHubSection(props: PluginHubSectionProps) {
         })
         .catch(() => {})
     }, 2000)
-    return () => clearInterval(timer)
-  }, [busyUrl, updatingName, data, installed, repoIdentities, repoHints, refreshInstalled])
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [busyUrl, updatingName, data, installed, repoIdentities, repoHints, refreshInstalled, settlePolledRecord])
 
   // The .body scroller is shared across top tabs AND in-tab list replacements
   // (Discover category/search/sort; Installed category/search).
@@ -1430,6 +1448,7 @@ export function PluginHubSection(props: PluginHubSectionProps) {
     // One record per attempt. A retry appends rather than reusing the old
     // one, so the card resolves to the newest and its Install button returns.
     const recordId = nextRecordId()
+    trackedInstall.current = { id: recordId, url: plugin.url, name: plugin.name }
     setRecords(list => enqueue(list, {
       id: recordId, kind: 'install', name: plugin.name, url: plugin.url, state: 'running',
     }))
@@ -1441,8 +1460,11 @@ export function PluginHubSection(props: PluginHubSectionProps) {
     })
       .then(res => res.json().then(body => ({ status: res.status, body })))
       .then(({ status, body }) => {
-        setBusyUrl(null)
-        sessionStorage.removeItem('dsph-pending')
+        if (trackedInstall.current?.id === recordId) {
+          trackedInstall.current = null
+          setBusyUrl(null)
+          sessionStorage.removeItem('dsph-pending')
+        }
         if (body.cancelled === true) {
           // User-cancelled: quiet reset, nothing to report.
           setRecords(list => drop(list, recordId))
@@ -1687,6 +1709,7 @@ export function PluginHubSection(props: PluginHubSectionProps) {
     // "update all" left the panel empty while several plugins were mid-flight
     // (#295 by @sanyecao88). One record per attempt, like the install flow.
     const updateRecordId = nextRecordId()
+    trackedUpdateRecordId.current = updateRecordId
     setRecords(list => enqueue(list, { id: updateRecordId, kind: 'update', name, state: 'running' }))
     return fetch(api('/dsh-pluginhub/update'), {
       method: 'POST',
@@ -1698,8 +1721,11 @@ export function PluginHubSection(props: PluginHubSectionProps) {
         // A response means the host settled the request (even a 4xx/5xx), so
         // the running row can hand back now. Only a lost response keeps the
         // marker + row for the poll to converge.
-        sessionStorage.removeItem('dsph-updating')
-        setUpdatingName(null)
+        if (trackedUpdateRecordId.current === updateRecordId) {
+          trackedUpdateRecordId.current = null
+          sessionStorage.removeItem('dsph-updating')
+          setUpdatingName(null)
+        }
         if (body.cancelled === true) {
           setRecords(list => drop(list, updateRecordId))
           refreshInstalled()
@@ -1759,6 +1785,9 @@ export function PluginHubSection(props: PluginHubSectionProps) {
         // its reply until pnpm finishes, #100): keep the marker AND the
         // running row, and let the status poll converge the outcome instead
         // of declaring a false failure — mirroring the install flow's catch.
+        // Stop a batch here: starting its next item would overwrite the only
+        // tracked operation while this one may still be running on the host.
+        return false
       })
   }, [refreshInstalled, t])
 
@@ -1987,7 +2016,10 @@ export function PluginHubSection(props: PluginHubSectionProps) {
         setUpdatingAll(false)
         return
       }
-      doUpdate(name).then(next, next)
+      doUpdate(name).then(responseReceived => {
+        if (responseReceived === false) setUpdatingAll(false)
+        else next()
+      }, () => setUpdatingAll(false))
     }
     next()
   }, [reminderBatchUpdatableNames, doUpdate])

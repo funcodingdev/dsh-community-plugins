@@ -93,3 +93,21 @@ describe('transient network retry (#83)', () => {
     expect(result.stderr).toContain('重放整个依赖树')
   })
 })
+
+
+it('reports the rebuild failure instead of the outdated hoist error', async () => {
+  const rebuildFailure = { ...OK, exitCode: 1, stderr: 'ENOSPC: no space left on device' }
+  const runner = scriptedRunner([HOIST_DIFF, rebuildFailure])
+  const result = await withHoistRecovery(runner.run, 'web', ['add', 'dsh-loop'])
+  expect(result.stderr).toContain('ENOSPC')
+  expect(result.stderr).not.toContain('ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF')
+  expect(runner.calls.filter(call => call[0] === 'add')).toHaveLength(1)
+})
+
+
+it('preserves cancellation during hoist recovery and starts no cleanup command', async () => {
+  const cancelled = { ...OK, exitCode: null, cancelled: true }
+  const runner = scriptedRunner([HOIST_DIFF, cancelled])
+  expect(await withHoistRecovery(runner.run, 'web', ['add', 'dsh-loop'])).toEqual(cancelled)
+  expect(runner.calls).toEqual([['add', 'dsh-loop'], ['install', '--no-frozen-lockfile']])
+})
