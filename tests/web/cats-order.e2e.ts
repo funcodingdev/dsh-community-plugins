@@ -1,6 +1,6 @@
 /** Real-host check for wrapping category chips and stable selection order. */
 import { chromium } from 'playwright'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { dshAvailable, launchPluginHubScaffold, openPluginHubPage } from './scaffold.ts'
 import type { WebScaffold } from './scaffold.ts'
 import { mockPluginHubCatalog } from './catalog.ts'
@@ -10,6 +10,8 @@ describe.skipIf(!dshAvailable())('web e2e: category chip order stays put', () =>
   beforeAll(async () => {
     s = await launchPluginHubScaffold()
     browser = await chromium.launch()
+  }, 300_000)
+  beforeEach(async () => {
     page = await browser.newPage({ viewport: { width: 1200, height: 800 } })
     await mockPluginHubCatalog(page)
     await openPluginHubPage(page, s)
@@ -18,6 +20,7 @@ describe.skipIf(!dshAvailable())('web e2e: category chip order stays put', () =>
       try { await b.waitFor({ timeout: i === 0 ? 30_000 : 3000 }); await b.click() } catch { break }
     }
   }, 300_000)
+  afterEach(async () => { await page?.close() })
   afterAll(async () => { await browser?.close(); await s?.close() })
 
   it('shows every category in multiple rows without clipping or reordering on selection', async () => {
@@ -33,6 +36,12 @@ describe.skipIf(!dshAvailable())('web e2e: category chip order stays put', () =>
       { width: 390, height: 844 },
     ]) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
+      await page.evaluate(async () => {
+        const win = globalThis as any
+        await win.document.fonts.ready
+        // Deliver resize observers and their React update before sampling.
+        await new Promise<void>(resolve => win.requestAnimationFrame(() => win.requestAnimationFrame(resolve)))
+      })
       // ResizeObserver can fold chips between separate Playwright reads.
       // Take every rectangle in one browser task, then retry the complete
       // layout contract while the resize/font-driven reflow settles.
@@ -78,12 +87,15 @@ describe.skipIf(!dshAvailable())('web e2e: category chip order stays put', () =>
     // Narrow viewports may fold the final category into overflow. Compare
     // the complete order only after expanding, not against a desktop snapshot
     // of a different visible subset.
-    const toggle = wrap.locator('button[aria-expanded]')
-    if (await toggle.count()) {
-      await toggle.click()
-      await expect.poll(() => toggle.getAttribute('aria-expanded')).toBe('true')
-    }
-    await expect.poll(() => chips.count()).toBe(6)
+    // The toggle can appear after a resize. Re-check the collapsed action
+    // until the full fixture is visible; a one-shot count() can miss it.
+    await expect.poll(async () => {
+      const expand = wrap.locator('button[aria-expanded="false"]')
+      if (await expand.isVisible()) await expand.click({ timeout: 1000 })
+      return (await chips.allTextContents()).slice(1)
+    }, { timeout: 10_000 }).toEqual([
+      'Interface', 'Developer tools', 'Automation', 'Knowledge & search', 'Agent capability',
+    ])
     const before = await chips.allTextContents()
     const filterBefore = await filters.boundingBox()
     await chips.last().click()
@@ -91,7 +103,6 @@ describe.skipIf(!dshAvailable())('web e2e: category chip order stays put', () =>
     await expect.poll(() => page.locator('[class*="pluginGrid"] > *').count()).toBe(7)
     await expect.poll(async () => (await chips.allTextContents()).slice(1)).toEqual(before.slice(1))
     expect(await filters.boundingBox()).toEqual(filterBefore)
-    if (await toggle.count()) await toggle.click()
   }, 300_000)
 
   it('expands and collapses overflow without clearing selection or exposing hidden controls', async () => {
@@ -99,14 +110,12 @@ describe.skipIf(!dshAvailable())('web e2e: category chip order stays put', () =>
       `extra-${index}`, { zh: `扩展分类 ${index + 1}`, en: `Extra category ${index + 1}` },
     ]))
     await mockPluginHubCatalog(page, extraCategories)
-    // Fetch the larger catalog without depending on the host's persisted dialog state.
-    await page.locator('[class*="discoverFilters"]').getByRole('checkbox').check()
+    await page.getByRole('button', { name: /^(设置|Settings)$/ }).first().click()
+    await page.getByRole('button', { name: /社区插件|Community Plugins/ }).click()
+    await page.waitForSelector('[class*="pluginGrid"] [class*="card"]', { timeout: 60_000 })
     const wrap = page.locator('[class*="catsWrap"]')
     const chips = wrap.locator('[data-chip="1"]')
     const toggle = wrap.locator('button[aria-expanded]')
-    // Establish this test's own collapsed state even if the preceding test
-    // failed while the complete list was open.
-    if (await toggle.getAttribute('aria-expanded') === 'true') await toggle.click()
     const rowCount = () => wrap.evaluate((element: { children: ArrayLike<{ getBoundingClientRect(): { top: number } }> }) =>
       new Set(Array.from(element.children, child => child.getBoundingClientRect().top)).size)
     for (const width of [1200, 390]) {
