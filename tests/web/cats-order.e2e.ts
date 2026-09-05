@@ -26,8 +26,7 @@ describe.skipIf(!dshAvailable())('web e2e: category chip order stays put', () =>
     await page.waitForSelector('[class*="pluginGrid"] [class*="card"]', { timeout: 60_000 })
     const wrap = page.locator('[class*="catsWrap"]')
     const chips = wrap.locator('[data-chip="1"]')
-    const before = await chips.allTextContents()
-    expect(before.length).toBeGreaterThan(2)
+    expect(await chips.count()).toBeGreaterThan(2)
     const filters = page.locator('[class*="discoverFilters"]')
     for (const viewport of [
       { width: 1200, height: 800 },
@@ -63,12 +62,23 @@ describe.skipIf(!dshAvailable())('web e2e: category chip order stays put', () =>
       }
       expect(new Set(chipWidths).size).toBeGreaterThan(1)
     }
+    // Narrow viewports may fold the final category into overflow. Compare
+    // the complete order only after expanding, not against a desktop snapshot
+    // of a different visible subset.
+    const toggle = wrap.locator('button[aria-expanded]')
+    if (await toggle.count()) {
+      await toggle.click()
+      await expect.poll(() => toggle.getAttribute('aria-expanded')).toBe('true')
+    }
+    await expect.poll(() => chips.count()).toBe(6)
+    const before = await chips.allTextContents()
     const filterBefore = await filters.boundingBox()
     await chips.last().click()
     await expect.poll(() => chips.last().getAttribute('aria-pressed')).toBe('true')
     await expect.poll(() => page.locator('[class*="pluginGrid"] > *').count()).toBe(7)
     await expect.poll(async () => (await chips.allTextContents()).slice(1)).toEqual(before.slice(1))
     expect(await filters.boundingBox()).toEqual(filterBefore)
+    if (await toggle.count()) await toggle.click()
   }, 300_000)
 
   it('expands and collapses overflow without clearing selection or exposing hidden controls', async () => {
@@ -81,6 +91,9 @@ describe.skipIf(!dshAvailable())('web e2e: category chip order stays put', () =>
     const wrap = page.locator('[class*="catsWrap"]')
     const chips = wrap.locator('[data-chip="1"]')
     const toggle = wrap.locator('button[aria-expanded]')
+    // Establish this test's own collapsed state even if the preceding test
+    // failed while the complete list was open.
+    if (await toggle.getAttribute('aria-expanded') === 'true') await toggle.click()
     const rowCount = () => wrap.evaluate((element: { children: ArrayLike<{ getBoundingClientRect(): { top: number } }> }) =>
       new Set(Array.from(element.children, child => child.getBoundingClientRect().top)).size)
     for (const width of [1200, 390]) {

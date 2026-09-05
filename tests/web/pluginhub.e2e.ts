@@ -10,7 +10,7 @@
  */
 
 import { chromium } from 'playwright'
-import { mockPluginHubCatalog } from './catalog.ts'
+import { catalogPlugins, mockPluginHubCatalog } from './catalog.ts'
 import type { Browser, Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { dshAvailable, launchPluginHubScaffold, openPluginHubPage, watchConsole } from './scaffold.ts'
@@ -83,37 +83,30 @@ describe.skipIf(!HAS_DSH)('web e2e: PluginHub', () => {
     const search = page.getByPlaceholder(/搜索插件|Search plugins/)
     const gridNames = () => page.locator('[class*="pluginGrid"] [class*="pluginName"]').allTextContents()
 
-    const beforeSearch = await gridNames()
+    const namesFor = (plugins: typeof catalogPlugins) => plugins.map(plugin => plugin.name.split('#').pop()!.split('/').pop()!)
+    const expectGrid = async (expected: string[]) => {
+      // Pagination can append while the search debounce is pending. Wait for
+      // the actual expected content, not merely a change in length or names.
+      await expect.poll(async () => (await gridNames()).slice(0, 12), { timeout: 30_000 })
+        .toEqual(expected.slice(0, 12))
+      const names = await gridNames()
+      expect(names).toEqual(expected.slice(0, names.length))
+    }
+    const allNames = namesFor(catalogPlugins)
+    await expectGrid(allNames)
     await search.fill('memory')
-    await expect.poll(async () => {
-      const names = await gridNames()
-      return names.length > 0 && JSON.stringify(names) !== JSON.stringify(beforeSearch)
-    }, { timeout: 30_000 }).toBe(true)
-    const searched = await gridNames()
-    // A broad query can still fill the first progressive batch, so assert the
-    // content changed instead of relying only on the visible count.
-    expect(searched.length).toBeGreaterThanOrEqual(1)
-    expect(searched).not.toEqual(beforeSearch)
+    await expectGrid(namesFor(catalogPlugins.filter(plugin => plugin.name.includes('memory'))))
     await search.fill('')
-    await expect.poll(async () => {
-      const names = await gridNames()
-      return names.length >= 12 && JSON.stringify(names) !== JSON.stringify(searched)
-    }, { timeout: 30_000 }).toBe(true)
+    await expectGrid(allNames)
 
-    const allNames = await gridNames()
     const chips = page.locator('[class*="catsWrap"] [data-chip="1"]')
-    await chips.nth(1).click()
-    await expect.poll(async () => {
-      const names = await gridNames()
-      return names.length > 0 && JSON.stringify(names) !== JSON.stringify(allNames)
-    }, { timeout: 30_000 }).toBe(true)
-    const categorized = await gridNames()
-    expect(categorized.length).toBeGreaterThanOrEqual(1)
-    expect(categorized).not.toEqual(allNames)
+    const interfaceChip = chips.filter({ hasText: /^(界面扩展|Interface)$/ })
+    await interfaceChip.click()
+    await expect.poll(() => interfaceChip.getAttribute('aria-pressed')).toBe('true')
+    await expectGrid(namesFor(catalogPlugins.filter(plugin => plugin.category === 'interface')))
     await chips.nth(0).click() // back to All
-    // Clearing the filter restores the first progressive batch, so a chip
-    // that silently stuck would not read as a pass.
-    await expect.poll(gridNames, { timeout: 30_000 }).toEqual(allNames)
+    await expect.poll(() => chips.nth(0).getAttribute('aria-pressed')).toBe('true')
+    await expectGrid(allNames)
   })
 
   it('never lists the pluginhub itself in the Installed tab — it manages itself from its own settings card', async () => {

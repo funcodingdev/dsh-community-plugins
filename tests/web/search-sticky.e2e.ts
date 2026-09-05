@@ -11,6 +11,7 @@ import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { dshAvailable, launchPluginHubScaffold, openPluginHubPage } from './scaffold.ts'
 import type { WebScaffold } from './scaffold.ts'
+import { mockPluginHubCatalog } from './catalog.ts'
 
 describe.skipIf(!dshAvailable())('web e2e: search box stays with the sticky header', () => {
   let s: WebScaffold, browser: any, page: any
@@ -18,6 +19,7 @@ describe.skipIf(!dshAvailable())('web e2e: search box stays with the sticky head
     s = await launchPluginHubScaffold()
     browser = await chromium.launch()
     page = await browser.newPage({ viewport: { width: 1200, height: 800 } })
+    await mockPluginHubCatalog(page)
     await openPluginHubPage(page, s)
     for (let i = 0; i < 6; i++) {
       const b = page.getByRole('button', { name: /^(Continue|继续|Configure later|稍后配置)$/ }).first()
@@ -32,7 +34,7 @@ describe.skipIf(!dshAvailable())('web e2e: search box stays with the sticky head
     await page.waitForSelector('[class*="pluginGrid"] [class*="card"]', { timeout: 60_000 })
 
     const search = page.locator('[class*="tabSearchRow"] input').first()
-    const scroller = page.locator('[class*="_body"]').first()
+    const scroller = page.locator('[class*="_body"]').filter({ has: page.locator('[class*="pluginGrid"]') })
     const ys: number[] = []
     for (const dy of [0, 20, 40, 80, 200, 600]) {
       // Body-context DOM types (document, HTMLElement) aren't in this
@@ -40,8 +42,9 @@ describe.skipIf(!dshAvailable())('web e2e: search box stays with the sticky head
       // reach `document` through globalThis instead of the bare global.
       await scroller.evaluate((el: any, y: number) => { el.scrollTop = y }, dy)
       await page.waitForTimeout(80)
+      if (dy > 0) expect(await scroller.evaluate((el: any) => el.scrollTop)).toBeGreaterThan(0)
       const box = await search.boundingBox()
-      if (box === null) continue
+      expect(box, `search box should be visible at scrollTop=${dy}`).not.toBeNull()
       ys.push(box.y)
       const topTag = await page.evaluate(({ x, y }: { x: number, y: number }) => {
         const doc = (globalThis as any).document

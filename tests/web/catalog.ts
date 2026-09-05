@@ -13,7 +13,7 @@ const sorts = {
   updated: { zh: '最近更新', en: 'Recently updated' },
   stars: { zh: '最多星标', en: 'Most stars' },
 }
-const plugins = Array.from({ length: 36 }, (_, index) => ({
+export const catalogPlugins = Array.from({ length: 36 }, (_, index) => ({
   name: index === 0 ? 'OpenViking#examples/dsh-memory-plugin' : `dsh-${index % 2 === 0 ? 'memory' : 'tools'}-${index}`,
   owner: 'example',
   url: `https://github.com/example/dsh-fixture-${index}`,
@@ -38,7 +38,7 @@ export async function mockPluginHubCatalog(page: Page, extraCategories: Record<s
     const query = (params.get('q') ?? '').toLowerCase()
     const currentPage = Number(params.get('page') ?? 1)
     const pageSize = Number(params.get('pageSize') ?? 12)
-    const filtered = plugins.filter(plugin => (category === 'all' || plugin.category === category)
+    const filtered = catalogPlugins.filter(plugin => (category === 'all' || plugin.category === category)
       && `${plugin.name} ${plugin.description.en}`.toLowerCase().includes(query))
     const totalPages = Math.ceil(filtered.length / pageSize)
     const hasMore = currentPage < totalPages
